@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import traceback
 import subprocess
 import sys
 import time
@@ -80,6 +81,17 @@ if IS_WINDOWS:
         user32.CallNextHookEx.restype = ctypes.c_ssize_t
     except Exception:
         user32 = None
+
+def _write_log(text):
+    """Пишет короткий маркер в log.txt — чтобы сбоя с EXE было видно."""
+    try:
+        log_path = default_data_path().parent / "log.txt"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {text}\n")
+    except Exception:
+        pass
+
 
 WH_MOUSE_LL = 14
 WM_MOUSEWHEEL = 0x020A
@@ -212,6 +224,7 @@ if HAS_TK:
     class WheelRingApp(tk.Tk):
         def __init__(self):
             super().__init__()
+            self.withdraw()
             self.title(APP_NAME)
             self.overrideredirect(True)
             self.resizable(False, False)
@@ -247,6 +260,7 @@ if HAS_TK:
 
             self._build_ui()
             self._install_hook()
+            _write_log("UI ready")
             self._bind_keys()
             self._redraw_ring()
             self._fill_fields()
@@ -314,11 +328,13 @@ if HAS_TK:
                 return
             self._last_wheel = now
             try:
-                self._toggle()
+                # деферим до idle — tkinter безопаснее вызывать вне коллбэка хука
+                self.after(0, self._toggle)
             except Exception:
                 pass
 
         def _quit(self):
+            _write_log("quit (shutdown)")
             try:
                 self._wheel_hook.uninstall()
             except Exception:
@@ -336,9 +352,13 @@ if HAS_TK:
             try:
                 self._wheel_hook = LowLevelWheelHook(self._on_wheel)
                 self._wheel_hook.install()
+                _write_log("wheel hook: installed OK")
             except Exception as ex:
+                _write_log(f"wheel hook: FAILED ({ex})")
                 self._wheel_hook = None
-                # колёсико недоступно — оставляем возможность открыть оверлей повторно
+                # без колёсика окно не появится само — показываем его явно,
+                # чтобы оверлей был виден даже при сбое хукка
+                self._show()
                 self._status(f"Колёсико недоступно: {ex}", ERR_RED)
 
         # ---------------------------------------------------------- drag
@@ -815,6 +835,7 @@ def _run():
     if not HAS_TK:
         print("Tkinter не найден — установите Python 3.x с tkinter"
               " (на Windows с python.org ставится по умолчанию).", file=sys.stderr)
+        _write_log("ERROR: tkinter unavailable")
         raise SystemExit(1)
     if not IS_WINDOWS:
         print("WheelRing — круговой оверлей для Windows.")
@@ -825,15 +846,18 @@ def _run():
         print("                    pyinstaller --onefile --windowed --name WheelRing wheel_ring.py")
         raise SystemExit(0)
 
+    _write_log("App start")
     try:
         app = WheelRingApp()
     except Exception as ex:
+        _write_log(f"fatal at startup: {ex}\n{traceback.format_exc()}")
         print(f"Не удалось открыть оверлей: {ex}", file=sys.stderr)
         raise SystemExit(1)
 
     try:
         app.mainloop()
     except Exception as ex:
+        _write_log(f"fatal in mainloop: {ex}\n{traceback.format_exc()}")
         print(f"Оверлей остановлен: {ex}", file=sys.stderr)
 
     try:
