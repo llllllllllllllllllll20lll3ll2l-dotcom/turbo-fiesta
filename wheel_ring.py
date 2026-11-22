@@ -224,7 +224,6 @@ if HAS_TK:
     class WheelRingApp(tk.Tk):
         def __init__(self):
             super().__init__()
-            self.withdraw()
             self.title(APP_NAME)
             self.overrideredirect(True)
             self.resizable(False, False)
@@ -246,7 +245,7 @@ if HAS_TK:
             self._run_timer = None
             self._run_index = 0
             self._current_run = None
-            self._visible = False
+            self._visible = True
             self._centered = False
             self._last_wheel = 0.0
             self._drag_start = None
@@ -265,6 +264,7 @@ if HAS_TK:
             self._redraw_ring()
             self._fill_fields()
             self._update_count()
+            self._center()
             self.protocol("WM_DELETE_WINDOW", self._hide)
 
         # ---------------------------------------------------------- окно
@@ -291,6 +291,11 @@ if HAS_TK:
             except Exception:
                 self.geometry(f"{WIN_W}x{WIN_H}")
             self._centered = True
+            try:
+                self.attributes("-topmost", True)
+                self.focus_force()
+            except Exception:
+                pass
 
         def _show(self):
             if self._visible:
@@ -353,11 +358,11 @@ if HAS_TK:
                 self._wheel_hook = LowLevelWheelHook(self._on_wheel)
                 self._wheel_hook.install()
                 _write_log("wheel hook: installed OK")
+                self._status("Колёсико: работает — колёсико скрывает/показывает оверлей", OK_GREEN)
             except Exception as ex:
                 _write_log(f"wheel hook: FAILED ({ex})")
                 self._wheel_hook = None
-                # без колёсика окно не появится само — показываем его явно,
-                # чтобы оверлей был виден даже при сбое хукка
+                # окно видно и без хукка; попробуем открыть его явно
                 self._show()
                 self._status(f"Колёсико недоступно: {ex}", ERR_RED)
 
