@@ -56,10 +56,14 @@
     <section class="settings hidden" id="settings" aria-label="Настройки" aria-hidden="true">
       <div class="settings-header"><h2>Настройки</h2><button class="icon-button" id="close-settings" aria-label="Закрыть настройки">✕</button></div>
       <div class="settings-body">
-        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Режим «Действия» работает с открытыми вкладками и сайтами; открытие сайтов, нажатия и ввод требуют подтверждения.</p></div></div>
+        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Режим «Действия» работает с открытыми вкладками и сайтами. Подтверждения действий можно настроить ниже.</p></div></div>
         <label class="field-label" for="model-select">Нейросеть</label>
         <select id="model-select"><option value="">Загрузка моделей…</option></select>
         <button class="secondary-button" id="refresh-models">↻ &nbsp; Обновить список моделей</button>
+        <div class="settings-divider"></div>
+        <p class="field-label">Браузерные действия</p>
+        <label class="approval-setting" for="confirm-actions"><span><strong>Спрашивать подтверждение</strong><small>Перед открытием сайтов, кликами и вводом текста</small></span><input id="confirm-actions" type="checkbox" checked aria-describedby="confirmation-warning"></label>
+        <p class="confirmation-warning" id="confirmation-warning">Если выключить: Перо сможет открывать сайты, нажимать кнопки и вводить текст без дополнительных запросов. Клик по «Отправить» может сразу отправить сообщение или форму. Используйте только если доверяете задаче и сайту. Пароли и платежи по-прежнему ограничены.</p>
         <div class="settings-divider"></div>
         <p class="field-label">Подключение</p>
         <p class="muted-text">Адрес: <span class="mono">127.0.0.1:11434</span>. Доступ с других устройств не нужен.</p>
@@ -67,7 +71,7 @@
           <div class="command-box"><code id="origin-command"></code><button id="copy-command" title="Скопировать команду" aria-label="Скопировать команду">⧉</button></div>
           <p class="tiny-note">Команда задаёт OLLAMA_ORIGINS для вашего пользователя Windows. Не меняйте OLLAMA_HOST на 0.0.0.0.</p>
         </div>
-        <p class="muted-text privacy-note">Режим «Действия» читает страницы по вашей просьбе и показывает подтверждение перед открытием сайтов, нажатием кнопок и вводом текста. Не используйте его на страницах с паролями, платёжными данными и личными сообщениями без проверки каждого шага. Текст страниц не сохраняется в истории; чаты остаются на этом ПК.</p>
+        <p class="muted-text privacy-note">Режим «Действия» читает страницы по вашей просьбе. Если подтверждения выключены, нажатия и ввод выполняются без окна проверки; не используйте это на страницах с паролями, платёжными данными и личными сообщениями. Текст страниц не сохраняется в истории; чаты остаются на этом ПК.</p>
       </div>
     </section>
     <div class="approval hidden" id="approval" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-detail">

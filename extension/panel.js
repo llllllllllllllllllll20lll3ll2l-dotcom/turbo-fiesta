@@ -2,6 +2,7 @@ import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, s
 import { openYouTubeMusic } from './youtube.mjs';
 import { switchTabByName, switchTabById, executeBrowserTool } from './browser-tools.mjs';
 import { runBrowserAgent } from './agent.mjs';
+import { confirmationsEnabled, approvalForRequest } from './approval-policy.mjs';
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -9,13 +10,14 @@ const ui = {
   connection: $('connection'), connectionLabel: $('connection-label'), connectionModel: $('connection-model'),
   prompt: $('prompt'), form: $('chat-form'), send: $('send-button'), stop: $('stop-button'),
   page: $('page-button'), selection: $('selection-button'), agent: $('agent-button'), contextHint: $('context-hint'),
-  modelSelect: $('model-select'), footerModel: $('footer-model'), settings: $('settings'),
+  modelSelect: $('model-select'), footerModel: $('footer-model'), settings: $('settings'), confirmActions: $('confirm-actions'),
   originCommand: $('origin-command'), toast: $('toast')
 };
 let history = [];
 let model = DEFAULT_MODEL;
 let pageEnabled = false;
 let agentEnabled = false;
+let confirmActions = true;
 let pendingTabTarget = null;
 let selectionContext = null;
 let requestController = null;
@@ -34,10 +36,13 @@ function toast(text) {
 }
 
 function updateContextUI() {
+  ui.confirmActions.checked = confirmActions;
+  ui.agent.classList.toggle('unconfirmed', !confirmActions);
+  ui.agent.title = confirmActions ? 'Режим действий: открыть сайт, нажать и ввести с подтверждением' : 'Внимание: действия без подтверждения — изменить можно в настройках';
   ui.page.classList.toggle('active', pageEnabled);
   ui.page.setAttribute('aria-pressed', String(pageEnabled));
   ui.selection.classList.toggle('active', Boolean(selectionContext));
-  ui.contextHint.textContent = selectionContext
+  ui.contextHint.textContent = !confirmActions ? '⚠ Действия без подтверждения' : selectionContext
     ? `Выделено: ${selectionContext.text.length} симв.`
     : pageEnabled ? 'Текст страницы будет добавлен при отправке' : 'Текст страницы читается только по вашему запросу';
 }
@@ -418,6 +423,7 @@ function showTabChoices(reply, matches, request) {
 
 async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
   const controller = new AbortController();
+  const approve = approvalForRequest(confirmActions, askApproval, controller.signal);
   requestController = controller;
   const id = ++requestId;
   history.push({ role: 'user', content: prompt });
@@ -437,10 +443,10 @@ async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
       matches = result.matches;
       pendingTabTarget = matches ? tabTarget : null;
     } else if (siteTarget) {
-      const result = await executeBrowserTool(chrome, siteTarget.url ? 'open_url' : 'search_web', siteTarget.url ? { url: siteTarget.url } : { query: siteTarget.query }, item => askApproval(item, controller.signal), controller.signal);
+      const result = await executeBrowserTool(chrome, siteTarget.url ? 'open_url' : 'search_web', siteTarget.url ? { url: siteTarget.url } : { query: siteTarget.query }, approve, controller.signal);
       answer = result.denied ? 'Открытие отменено. Никаких сайтов не открывал.' : result.message;
     } else {
-      const result = await runBrowserAgent({ prompt, model, signal: controller.signal, approve: item => askApproval(item, controller.signal), onProgress: text => {
+      const result = await runBrowserAgent({ prompt, model, signal: controller.signal, approve, onProgress: text => {
         if (id === requestId && !controller.signal.aborted) { renderAssistant(reply.bubble, text); scrollDown(); }
       } });
       answer = result.answer;
@@ -559,7 +565,22 @@ ui.agent.addEventListener('click', () => {
   agentEnabled = !agentEnabled;
   ui.agent.classList.toggle('active', agentEnabled);
   ui.agent.setAttribute('aria-pressed', String(agentEnabled));
-  toast(agentEnabled ? 'Режим действий включён. Открытие сайта, клики и ввод требуют отдельного подтверждения.' : 'Режим действий выключен.');
+  toast(agentEnabled ? (confirmActions ? 'Режим действий включён. Открытие сайта, клики и ввод требуют отдельного подтверждения.' : 'Внимание: режим действий включён БЕЗ подтверждений.') : 'Режим действий выключен.');
+});
+ui.confirmActions.addEventListener('change', async () => {
+  const next = ui.confirmActions.checked;
+  ui.confirmActions.disabled = true;
+  try {
+    await chrome.storage.local.set({ confirmActions: next });
+    confirmActions = next;
+    updateContextUI();
+    toast(next ? 'Подтверждения действий включены.' : 'Подтверждения отключены. Проверяйте задачи: клики могут отправить сообщения и формы.');
+  } catch {
+    ui.confirmActions.checked = confirmActions;
+    toast('Не удалось сохранить настройку. Прежнее значение сохранено.');
+  } finally {
+    ui.confirmActions.disabled = false;
+  }
 });
 ui.page.addEventListener('click', () => {
   pageEnabled = !pageEnabled;
@@ -627,9 +648,10 @@ $('copy-command').addEventListener('click', async () => {
 
 async function start() {
   try {
-    const stored = await chrome.storage.local.get(['history', 'model']);
+    const stored = await chrome.storage.local.get(['history', 'model', 'confirmActions']);
     history = safeHistory(stored.history);
     if (typeof stored.model === 'string' && stored.model) model = stored.model;
+    confirmActions = confirmationsEnabled(stored.confirmActions);
   } catch { /* First launch or storage unavailable. */ }
   showHistory();
   updateContextUI();
