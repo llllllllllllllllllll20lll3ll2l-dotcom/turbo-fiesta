@@ -316,7 +316,9 @@ async function runYouTubeRequest(prompt, intent) {
     if (result.status === 'playing') {
       answer = result.ad
         ? `Открыл «${result.title}». Сейчас на YouTube идёт реклама — после неё должно начаться видео. Проверьте вкладку.`
-        : `Открыл «${result.title}» на YouTube. Видеоплеер воспроизводит запись.`;
+        : result.muted
+          ? `Открыл «${result.title}». Видео воспроизводится без звука — включите звук в открытой вкладке.`
+          : `Открыл «${result.title}» на YouTube. Видеоплеер воспроизводит запись.`;
     } else if (result.status === 'opened') {
       answer = `Открыл «${result.title}» на YouTube, но браузер не подтвердил воспроизведение. Нажмите ▶ в открытой вкладке.`;
     } else {

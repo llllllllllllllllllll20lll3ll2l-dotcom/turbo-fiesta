@@ -15,7 +15,7 @@ async function waitForLoaded(api, tabId, signal) {
       api.tabs.onUpdated.removeListener(onUpdated);
       signal?.removeEventListener('abort', onAbort);
     };
-    const finish = (error) => {
+    const finish = error => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -31,6 +31,18 @@ async function waitForLoaded(api, tabId, signal) {
   checkAbort(signal);
 }
 
+async function waitForWatchUrl(api, tabId, expected, signal) {
+  for (let n = 0; n < 14; n++) {
+    checkAbort(signal);
+    try {
+      const tab = await api.tabs.get(tabId);
+      if (youtubeWatchUrl(tab.url) === expected) return true;
+    } catch { return false; }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
 function isYouTubeTab(tab) {
   try {
     const url = new URL(tab?.url || '');
@@ -38,22 +50,73 @@ function isYouTubeTab(tab) {
   } catch { return false; }
 }
 
-// Runs in the YouTube search tab. Returns only visible candidate links; no page commands are executed.
-async function findVideoCandidates() {
-  const end = Date.now() + 9000;
+// Chrome serializes this function for execution in the page. It must not rely on module variables.
+// Current YouTube can render classic ytd-video-renderer OR new yt-lockup-view-model cards.
+export async function findVideoCandidates() {
+  const end = Date.now() + 10500;
   while (Date.now() < end) {
-    const nodes = document.querySelectorAll('ytd-video-renderer a#video-title[href], ytd-rich-item-renderer a#video-title[href]');
-    const videos = Array.from(nodes).slice(0, 12).filter(node => node.getClientRects().length > 0).map(node => ({
-      href: node.href,
-      title: (node.getAttribute('title') || node.textContent || '').trim().slice(0, 160)
-    }));
+    const root = document.querySelector('ytd-search, #primary') || document;
+    const links = Array.from(root.querySelectorAll('a[href*="watch?v="], a[href*="/watch?"]'));
+    const videos = links.filter(link => !link.closest('ytd-ad-slot-renderer, ytd-promoted-video-renderer, ytd-reel-item-renderer, ytd-shorts, [class*="shortsLockup"]'))
+      .slice(0, 32).map(link => {
+        const card = link.closest('yt-lockup-view-model, ytd-video-renderer, ytd-rich-item-renderer, ytd-playlist-renderer') || link;
+        const heading = card.querySelector('h3, #video-title, .yt-lockup-metadata-view-model__heading-reset');
+        return {
+          href: link.href,
+          title: (link.getAttribute('title') || link.getAttribute('aria-label') || heading?.textContent || link.textContent || '').trim().slice(0, 160)
+        };
+      });
     if (videos.length) return videos;
     await new Promise(resolve => setTimeout(resolve, 450));
   }
   return [];
 }
 
-// Browser autoplay policy may refuse play(). In that case the user can click Play in the opened tab.
+// Only a previously validated YouTube video ID reaches this injected function.
+// Show a black agent pointer, move it to the result, then click the real link.
+export async function clickVideoCandidate(videoId) {
+  const links = Array.from(document.querySelectorAll('a[href*="watch?v="], a[href*="/watch?"]'));
+  const link = links.find(node => {
+    try {
+      const url = new URL(node.href);
+      return url.hostname === 'www.youtube.com' && url.pathname === '/watch' && url.searchParams.get('v') === videoId;
+    } catch { return false; }
+  });
+  if (!link) return { clicked: false };
+  const card = link.closest?.('yt-lockup-view-model, ytd-video-renderer, ytd-rich-item-renderer') || link;
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const host = document.createElement('div');
+  host.setAttribute('data-pero-agent-pointer', '');
+  host.style.cssText = 'position:fixed;left:36px;top:112px;width:34px;height:38px;z-index:2147483647;pointer-events:none;transition:left .55s ease,top .55s ease;filter:drop-shadow(0 2px 3px #0009);';
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 34 38');
+  svg.setAttribute('width', '34');
+  svg.setAttribute('height', '38');
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrow.setAttribute('d', 'M2 2v28l7-7 6 12 5-3-6-12h13Z');
+  arrow.setAttribute('fill', '#111114');
+  arrow.setAttribute('stroke', '#fff');
+  arrow.setAttribute('stroke-width', '2');
+  arrow.setAttribute('stroke-linejoin', 'round');
+  svg.append(arrow);
+  const badge = document.createElement('span');
+  badge.textContent = 'Перо';
+  badge.style.cssText = 'position:absolute;top:20px;left:20px;background:#111114;color:#fff;border:1px solid #fff;border-radius:8px;padding:3px 7px;font:600 11px Arial,sans-serif;white-space:nowrap;';
+  shadow.append(svg, badge);
+  document.documentElement.append(host);
+  host.getBoundingClientRect();
+  const linkRect = link.getBoundingClientRect();
+  const rect = linkRect.width && linkRect.height ? linkRect : card.getBoundingClientRect();
+  host.style.left = `${Math.max(8, Math.min(innerWidth - 40, rect.left + Math.min(rect.width / 2, 100)))}px`;
+  host.style.top = `${Math.max(8, Math.min(innerHeight - 40, rect.top + Math.min(rect.height / 2, 35)))}px`;
+  await new Promise(resolve => setTimeout(resolve, 1050));
+  link.click();
+  setTimeout(() => host.remove(), 2200);
+  return { clicked: true };
+}
+
+// Autoplay can fail without a user gesture in the tab. Report that honestly.
 async function tryPlayVideo() {
   const end = Date.now() + 10000;
   while (Date.now() < end) {
@@ -62,27 +125,25 @@ async function tryPlayVideo() {
       if (video.paused) {
         try {
           await Promise.race([video.play(), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))]);
-        } catch { /* Autoplay is restricted by the site or browser. */ }
+        } catch { /* Browser/site blocked automatic playback. */ }
       }
-      return { playing: !video.paused, ad: Boolean(document.querySelector('.html5-video-player.ad-showing')), title: document.title.slice(0, 160) };
+      return { playing: !video.paused, muted: video.muted || video.volume === 0, ad: Boolean(document.querySelector('.html5-video-player.ad-showing')) };
     }
     await new Promise(resolve => setTimeout(resolve, 450));
   }
-  return { playing: false, ad: false, title: document.title.slice(0, 160) };
+  return { playing: false, muted: false, ad: false };
 }
 
 export async function openYouTubeMusic(intent, api = chrome, signal, onProgress = () => {}) {
   if (!intent?.query || typeof intent.query !== 'string') throw new Error('Не указано, что искать на YouTube.');
   checkAbort(signal);
-  // The query is encoded as a parameter; destination and video links are restricted to YouTube.
   const searchUrl = `${YOUTUBE}/results?search_query=${encodeURIComponent(intent.query.slice(0, 110))}`;
   onProgress('Открываю поиск YouTube…');
   const tab = await api.tabs.create({ url: searchUrl, active: true });
   if (!tab?.id) throw new Error('Не удалось открыть вкладку YouTube.');
   if (!intent.play) return { status: 'search', url: searchUrl };
   await waitForLoaded(api, tab.id, signal);
-  const loaded = await api.tabs.get(tab.id);
-  if (!isYouTubeTab(loaded)) return { status: 'search', url: searchUrl };
+  if (!isYouTubeTab(await api.tabs.get(tab.id))) return { status: 'search', url: searchUrl };
   onProgress('Ищу подходящее видео…');
   let results;
   try {
@@ -92,8 +153,16 @@ export async function openYouTubeMusic(intent, api = chrome, signal, onProgress 
   const first = results?.result?.find(item => youtubeWatchUrl(item.href));
   if (!first) return { status: 'search', url: searchUrl };
   const watchUrl = youtubeWatchUrl(first.href);
+  const videoId = new URL(watchUrl).searchParams.get('v');
   onProgress('Открываю видео…');
-  await api.tabs.update(tab.id, { url: watchUrl, active: true });
+  try {
+    await api.scripting.executeScript({ target: { tabId: tab.id }, func: clickVideoCandidate, args: [videoId] });
+  } catch { /* Navigation can destroy the injection response; check the tab URL below. */ }
+  checkAbort(signal);
+  if (!await waitForWatchUrl(api, tab.id, watchUrl, signal)) {
+    // The site may ignore programmatic clicks. Navigate to the validated URL instead.
+    await api.tabs.update(tab.id, { url: watchUrl, active: true });
+  }
   await waitForLoaded(api, tab.id, signal);
   if (!isYouTubeTab(await api.tabs.get(tab.id))) return { status: 'opened', title: first.title, url: watchUrl };
   let playback;
@@ -101,6 +170,6 @@ export async function openYouTubeMusic(intent, api = chrome, signal, onProgress 
     [playback] = await api.scripting.executeScript({ target: { tabId: tab.id }, func: tryPlayVideo });
   } catch { return { status: 'opened', title: first.title, url: watchUrl }; }
   checkAbort(signal);
-  const playing = Boolean(playback?.result?.playing);
-  return { status: playing ? 'playing' : 'opened', ad: Boolean(playback?.result?.ad), title: first.title, url: watchUrl };
+  const result = playback?.result;
+  return { status: result?.playing ? 'playing' : 'opened', muted: Boolean(result?.muted), ad: Boolean(result?.ad), title: first.title, url: watchUrl };
 }
