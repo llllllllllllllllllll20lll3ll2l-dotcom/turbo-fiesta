@@ -831,6 +831,8 @@ if HAS_TK:
                 save_data(self._data, self._data_path)
             except Exception:
                 pass
+
+
 def _run():
     if not HAS_TK:
         print("Tkinter не найден — установите Python 3.x с tkinter"
