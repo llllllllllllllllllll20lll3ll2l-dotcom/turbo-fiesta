@@ -304,6 +304,7 @@ async function runAgent(goal, { assistantText = '' } = {}) {
   let finalAnswer = null;
   let lastResult = null;
   let iterations = 0;
+  let errorOccurred = null;
 
   try {
     while (iterations < MAX_STEPS) {
@@ -320,7 +321,8 @@ async function runAgent(goal, { assistantText = '' } = {}) {
           fetchImpl: fetch,
         });
       } catch (ex) {
-        emit({ kind: 'error', message: `Ошибка запроса к Ollama: ${ex?.message || ex}` });
+        errorOccurred = `Ошибка запроса к Ollama: ${ex?.message || ex}`;
+        emit({ kind: 'error', message: errorOccurred });
         break;
       }
       const action = parseAction(response.text);
@@ -415,6 +417,7 @@ async function runAgent(goal, { assistantText = '' } = {}) {
               : `Форма не заполнена: ${result.reason || 'нет данных'}.`;
           } else {
             lastResult = `Ошибка заполнения: ${result.reason}`;
+            errorOccurred = errorOccurred || lastResult;
             emit({ kind: 'error', message: lastResult });
           }
           history.push({ role: 'assistant', content: response.text.slice(0, 500) });
@@ -429,8 +432,14 @@ async function runAgent(goal, { assistantText = '' } = {}) {
       }
     }
 
+    if (errorOccurred) {
+      // ошибка уже показана — не выдавай фантомный «ответ»
+      emit({ kind: 'status', state: 'idle' });
+      emit({ kind: 'done' });
+      return;
+    }
+
     if (!finalAnswer) {
-      // модель не дала ответа — показываем последнее
       finalAnswer = lastResult || 'Агент выполнил ограниченный цикл действий без явного ответа.';
     }
 
