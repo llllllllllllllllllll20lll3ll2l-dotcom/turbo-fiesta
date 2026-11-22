@@ -1,6 +1,6 @@
-import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, tabSwitchIntent, makeMessages, safeHistory } from './core.mjs';
+import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, tabSwitchIntent, siteOpenIntent, browserActionIntent, makeMessages, safeHistory } from './core.mjs';
 import { openYouTubeMusic } from './youtube.mjs';
-import { switchTabByName } from './browser-tools.mjs';
+import { switchTabByName, switchTabById, executeBrowserTool } from './browser-tools.mjs';
 import { runBrowserAgent } from './agent.mjs';
 
 const $ = id => document.getElementById(id);
@@ -16,6 +16,7 @@ let history = [];
 let model = DEFAULT_MODEL;
 let pageEnabled = false;
 let agentEnabled = false;
+let pendingTabTarget = null;
 let selectionContext = null;
 let requestController = null;
 let requestId = 0;
@@ -380,7 +381,42 @@ function askApproval({ title, detail, site }, signal) {
   });
 }
 
-async function runBrowserRequest(prompt, tabTarget = null) {
+function showTabChoices(reply, matches, request) {
+  const choices = document.createElement('div');
+  choices.className = 'tab-choices';
+  for (const [index, tab] of matches.entries()) {
+    const button = document.createElement('button');
+    let host = '';
+    try { host = new URL(tab.url).hostname; } catch { host = tab.url; }
+    button.type = 'button';
+    button.textContent = `${index + 1}. ${tab.title} · ${host} · окно ${tab.windowId}, вкладка ${tab.id}`;
+    button.addEventListener('click', async () => {
+      if (request !== requestId || requestController) return;
+      choices.querySelectorAll('button').forEach(item => { item.disabled = true; });
+      const controller = new AbortController();
+      requestController = controller;
+      updateBusy(true);
+      try {
+        const result = await switchTabById(chrome, tab);
+        if (request !== requestId) return;
+        const answer = result.message;
+        renderAssistant(reply.bubble, answer);
+        if (result.ok) pendingTabTarget = null;
+        history[history.length - 1] = { role: 'assistant', content: answer };
+        await saveHistory();
+      } catch (error) {
+        if (request === requestId) renderAssistant(reply.bubble, `Не удалось переключиться: ${String(error.message || error).slice(0, 180)}`);
+      } finally {
+        if (request === requestId) { requestController = null; updateBusy(false); }
+      }
+    });
+    choices.append(button);
+  }
+  reply.bubble.append(choices);
+  scrollDown();
+}
+
+async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
   const controller = new AbortController();
   requestController = controller;
   const id = ++requestId;
@@ -388,15 +424,21 @@ async function runBrowserRequest(prompt, tabTarget = null) {
   addMessage('user', prompt);
   ui.prompt.value = '';
   ui.prompt.style.height = '';
-  const reply = addMessage('assistant', tabTarget ? 'Ищу вкладку…' : 'Начинаю действия…');
+  const reply = addMessage('assistant', tabTarget ? 'Ищу вкладку…' : siteTarget ? 'Проверяю адрес…' : 'Начинаю действия…');
   reply.bubble.classList.add('typing');
   updateBusy(true);
   await saveHistory();
+  let matches = null;
   try {
     let answer;
     if (tabTarget) {
       const result = await switchTabByName(chrome, tabTarget);
       answer = result.message;
+      matches = result.matches;
+      pendingTabTarget = matches ? tabTarget : null;
+    } else if (siteTarget) {
+      const result = await executeBrowserTool(chrome, siteTarget.url ? 'open_url' : 'search_web', siteTarget.url ? { url: siteTarget.url } : { query: siteTarget.query }, item => askApproval(item, controller.signal), controller.signal);
+      answer = result.denied ? 'Открытие отменено. Никаких сайтов не открывал.' : result.message;
     } else {
       const result = await runBrowserAgent({ prompt, model, signal: controller.signal, approve: item => askApproval(item, controller.signal), onProgress: text => {
         if (id === requestId && !controller.signal.aborted) { renderAssistant(reply.bubble, text); scrollDown(); }
@@ -421,6 +463,7 @@ async function runBrowserRequest(prompt, tabTarget = null) {
       reply.bubble.classList.remove('typing');
       requestController = null;
       updateBusy(false);
+      if (matches) showTabChoices(reply, matches, id);
       ui.prompt.focus();
     }
   }
@@ -429,12 +472,15 @@ async function runBrowserRequest(prompt, tabTarget = null) {
 async function sendQuestion(question) {
   const prompt = question.trim().slice(0, PROMPT_LIMIT);
   if (!prompt || requestController || preparing) return;
-  const tabTarget = tabSwitchIntent(prompt);
+  const tabTarget = tabSwitchIntent(prompt) || (pendingTabTarget && prompt.toLocaleLowerCase('ru') === pendingTabTarget.toLocaleLowerCase('ru') ? pendingTabTarget : null);
   if (tabTarget) return runBrowserRequest(prompt, tabTarget);
+  const siteTarget = siteOpenIntent(prompt);
+  if (siteTarget) return runBrowserRequest(prompt, null, siteTarget);
   const youtube = youtubeMusicIntent(prompt);
   if (youtube) return runYouTubeRequest(prompt, youtube);
+  if (/^MAX$/iu.test(prompt)) { toast('Уточните: «зайди на вкладку MAX» или «открой сайт MAX».'); return; }
   if (!model) { toast('Сначала подключите Ollama и скачайте модель.'); openSettings(); return; }
-  if (agentEnabled) return runBrowserRequest(prompt);
+  if (agentEnabled || browserActionIntent(prompt)) return runBrowserRequest(prompt);
   preparing = true;
   const preparationId = requestId;
   let context = selectionContext;
@@ -552,6 +598,7 @@ $('new-chat').addEventListener('click', async () => {
   requestController = null;
   updateBusy(false);
   history = [];
+  pendingTabTarget = null;
   selectionContext = null;
   pageEnabled = false;
   ui.prompt.value = '';

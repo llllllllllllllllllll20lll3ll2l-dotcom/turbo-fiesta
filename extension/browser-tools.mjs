@@ -19,17 +19,29 @@ export async function listTabs(api) {
     .map(tab => ({ id: tab.id, windowId: tab.windowId, title: String(tab.title || 'Без названия').slice(0, 110), url: String(tab.url || '').slice(0, 240), active: Boolean(tab.active) }));
 }
 
+export async function switchTabById(api, requested) {
+  const tab = (await listTabs(api)).find(item => item.id === requested.id && item.windowId === requested.windowId);
+  if (!tab || tab.title !== requested.title || tab.url !== requested.url) {
+    return { ok: false, message: 'Вкладка изменилась или закрыта. Запросите список вкладок снова.' };
+  }
+  await api.tabs.update(tab.id, { active: true });
+  await api.windows.update(tab.windowId, { focused: true });
+  const [active] = await api.tabs.query({ active: true, windowId: tab.windowId });
+  const window = await api.windows.get(tab.windowId);
+  if (active?.id !== tab.id || !window?.focused) {
+    return { ok: false, message: `Не удалось подтвердить переключение на «${tab.title}». Проверьте вкладки браузера.`, tab };
+  }
+  return { ok: true, message: `Переключился на вкладку «${tab.title}» (окно ${tab.windowId}).`, tab };
+}
+
 export async function switchTabByName(api, target) {
   const tabs = await listTabs(api);
   const matches = tabs.map(tab => ({ ...tab, score: rankTab(tab, target) })).filter(tab => tab.score > 0).sort((a, b) => b.score - a.score);
   if (!matches.length) return { ok: false, message: `Открытая вкладка «${String(target).slice(0, 65)}» не найдена.` };
   if (matches.length > 1 && matches[0].score === matches[1].score) {
-    return { ok: false, message: `Нашёл несколько вкладок: ${matches.slice(0, 3).map(tab => tab.title).join('; ')}. Уточните название.` };
+    return { ok: false, message: `Найдено несколько вкладок «${String(target).slice(0, 65)}». Выберите нужную ниже.`, matches: matches.filter(item => item.score === matches[0].score).slice(0, 8) };
   }
-  const tab = matches[0];
-  await api.tabs.update(tab.id, { active: true });
-  if (api.windows?.update) await api.windows.update(tab.windowId, { focused: true });
-  return { ok: true, message: `Переключился на вкладку «${tab.title}».`, tab };
+  return switchTabById(api, matches[0]);
 }
 
 export function safeWebUrl(value) {
@@ -91,8 +103,15 @@ export async function executeBrowserTool(api, name, args, approve, signal) {
     if (!url) throw new Error('Небезопасный или некорректный адрес. Для открытия разрешены только публичные HTTPS-сайты.');
     if (!await approve?.({ title: 'Открыть страницу?', detail: url, site: new URL(url).hostname })) return { denied: true, message: 'Пользователь отменил открытие сайта.' };
     ensureActive();
-    await api.tabs.create({ url, active: true });
-    return { ok: true, message: 'Открыл новую вкладку. Сначала прочитайте страницу, прежде чем делать выводы.' };
+    const created = await api.tabs.create({ url, active: true });
+    if (!created?.id || !created.windowId) throw new Error('Браузер не подтвердил создание вкладки. Проверьте вкладки вручную.');
+    await api.windows.update(created.windowId, { focused: true });
+    const [active] = await api.tabs.query({ active: true, windowId: created.windowId });
+    const window = await api.windows.get(created.windowId);
+    if (active?.id !== created.id || !window?.focused) {
+      return { ok: false, message: `Вкладка с адресом ${url} создана, но её отображение не подтверждено. Проверьте окно браузера.` };
+    }
+    return { ok: true, message: `Создал активную вкладку с адресом ${url}. Дождитесь загрузки сайта; содержимое страницы пока не проверено.` };
   }
   if (name === 'click' || name === 'type') {
     const ref = String(input.ref || '').slice(0, 20);

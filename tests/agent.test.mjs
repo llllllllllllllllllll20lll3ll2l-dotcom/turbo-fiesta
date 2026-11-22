@@ -1,25 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tabSwitchIntent } from '../extension/core.mjs';
-import { rankTab, safeWebUrl, switchTabByName, executeBrowserTool } from '../extension/browser-tools.mjs';
+import { tabSwitchIntent, siteOpenIntent, browserActionIntent } from '../extension/core.mjs';
+import { rankTab, safeWebUrl, switchTabByName, switchTabById, executeBrowserTool } from '../extension/browser-tools.mjs';
 import { runBrowserAgent } from '../extension/agent.mjs';
 
 const ref = 'deadbeef:1:2';
 const tab = { id: 8, windowId: 2, title: 'MAX — чат', url: 'https://max.ru/', active: true };
 function mockApi() {
   const events = [];
+  let activeTab = tab;
   const api = {
     tabs: {
-      query: async () => [tab],
-      update: async (...args) => { events.push(['update', ...args]); },
-      create: async args => { events.push(['create', args]); },
+      query: async query => query?.active ? [activeTab] : [tab],
+      update: async (...args) => { events.push(['update', ...args]); activeTab = { ...tab, id: args[0] }; },
+      create: async args => { events.push(['create', args]); activeTab = { id: 20, windowId: 2, url: args.url, active: true }; return activeTab; },
       sendMessage: async (_id, msg) => {
         events.push(['message', msg]);
         if (msg.action === 'INSPECT') return { ok: true, result: { label: 'Отправить', href: '', draft: 'Привет' } };
         return { ok: true, result: { scheduled: true } };
       }
     },
-    windows: { update: async (...args) => { events.push(['window', ...args]); } }
+    windows: { update: async (...args) => { events.push(['window', ...args]); }, get: async () => ({ focused: true }) }
   };
   return { api, events };
 }
@@ -41,7 +42,40 @@ test('tab matching prefers exact word; ambiguous matches do not switch', async (
   api.tabs.query = async () => [{ ...tab, id: 8 }, { ...tab, id: 9 }];
   const result = await switchTabByName(api, 'MAX');
   assert.equal(result.ok, false);
+  assert.equal(result.matches.length, 2);
   assert.equal(events.length, 0);
+  const chosen = await switchTabById(api, result.matches[1]);
+  assert.equal(chosen.ok, false); // mocked query still reports the first tab active
+});
+
+test('user-selected tab id switches the intended duplicate and verifies it', async () => {
+  const { api, events } = mockApi();
+  const tabs = [{ ...tab, id: 8 }, { ...tab, id: 9 }];
+  let selected = tabs[0];
+  api.tabs.query = async query => query?.active ? [selected] : tabs;
+  api.tabs.update = async id => { events.push(['update', id]); selected = tabs.find(item => item.id === id); };
+  const ambiguous = await switchTabByName(api, 'MAX');
+  const chosen = await switchTabById(api, ambiguous.matches[1]);
+  assert.equal(chosen.ok, true);
+  assert.deepEqual(events[0], ['update', 9]);
+});
+
+test('does not claim a switch when the window is not focused', async () => {
+  const { api } = mockApi();
+  api.windows.get = async () => ({ focused: false });
+  const result = await switchTabByName(api, 'MAX');
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Не удалось подтвердить/);
+});
+
+test('routes explicit site commands without hallucinating a domain', () => {
+  assert.deepEqual(siteOpenIntent('открой сайт MAX'), { url: 'https://web.max.ru/', label: 'веб-версия мессенджера MAX' });
+  assert.equal(siteOpenIntent('открой сайт example.org').url, 'https://example.org');
+  assert.deepEqual(siteOpenIntent('открой сайт неизвестный'), { query: 'неизвестный', label: 'неизвестный' });
+  assert.equal(siteOpenIntent('расскажи о сайте MAX'), null);
+  assert.equal(browserActionIntent('нажми кнопку Отправить'), true);
+  assert.equal(browserActionIntent('открой сайт MAX'), true);
+  assert.equal(browserActionIntent('какие сайты ты знаешь?'), false);
 });
 
 test('rejects private and non-web addresses and credentials', () => {
@@ -60,6 +94,21 @@ test('opening sites, search and form clicks require explicit approval', async ()
   const click = await executeBrowserTool(api, 'click', { ref }, async () => false);
   assert.equal(click.denied, true);
   assert.equal(events.filter(event => event[0] === 'create' || event[1]?.action === 'CLICK').length, 0);
+});
+
+test('site navigation creates and verifies a browser tab only after confirmation', async () => {
+  const { api, events } = mockApi();
+  const confirmed = await executeBrowserTool(api, 'open_url', { url: 'https://web.max.ru/' }, async item => {
+    assert.equal(item.site, 'web.max.ru');
+    return true;
+  });
+  assert.equal(confirmed.ok, true);
+  assert.match(confirmed.message, /Дождитесь загрузки/);
+  assert.ok(events.some(event => event[0] === 'create' && event[1].url === 'https://web.max.ru/'));
+  api.windows.get = async () => ({ focused: false });
+  const unconfirmed = await executeBrowserTool(api, 'open_url', { url: 'https://example.org/' }, async () => true);
+  assert.equal(unconfirmed.ok, false);
+  assert.match(unconfirmed.message, /не подтверждено/);
 });
 
 test('click uses inspected form draft and target tab unchanged after approval', async () => {

@@ -49,6 +49,22 @@ export function tabSwitchIntent(prompt) {
   return target;
 }
 
+export function siteOpenIntent(prompt) {
+  if (typeof prompt !== 'string') return null;
+  const match = /^(?:открой|открыть|зайди на|перейди на)\s+(?:веб[- ]?)?сайт\s+(.+)$/iu.exec(prompt.trim());
+  if (!match) return null;
+  const target = match[1].replace(/^[«"'\s]+|[»"'.!?\s]+$/g, '').trim();
+  if (!target || target.length > 150 || /\s+(?:и|затем)\s+(?:отправ|напиши|нажми|введи|купи)/iu.test(target)) return null;
+  if (/^(?:max|мах|макс)$/iu.test(target)) return { url: 'https://web.max.ru/', label: 'веб-версия мессенджера MAX' };
+  if (/^https:\/\//i.test(target)) return { url: target, label: target };
+  if (/^[\p{L}\d-]+(?:\.[\p{L}\d-]+)+(?:\/[^\s]*)?$/iu.test(target)) return { url: `https://${target}`, label: target };
+  return { query: target, label: target };
+}
+
+export function browserActionIntent(prompt) {
+  return typeof prompt === 'string' && /^(?:пожалуйста[,\s]*)?(?:открой|зайди|перейди|переключись|покажи|найди|поищи|нажми|кликни|введи|впиши|прокрути|отправь)(?:\s|$)/iu.test(prompt.trim());
+}
+
 export function youtubeWatchUrl(raw) {
   try {
     const url = new URL(raw, 'https://www.youtube.com');
