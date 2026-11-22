@@ -58,7 +58,7 @@ test('agent pointer is drawn and clicks the chosen search result', async () => {
     click() { clicked = true; }
   };
   const el = () => ({ style: {}, setAttribute() {}, append() {}, attachShadow() { return { append() {} }; }, getBoundingClientRect() {}, remove() {} });
-  globalThis.document = { querySelectorAll: () => [link], createElement: el, createElementNS: el, documentElement: { append() { cursorDrawn = true; } } };
+  globalThis.document = { querySelector: () => null, querySelectorAll: () => [link], createElement: el, createElementNS: el, documentElement: { append() { cursorDrawn = true; } } };
   globalThis.innerWidth = 1000;
   globalThis.innerHeight = 700;
   try {

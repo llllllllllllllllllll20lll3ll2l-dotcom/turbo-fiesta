@@ -1,8 +1,9 @@
-import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, tabSwitchIntent, siteOpenIntent, browserActionIntent, makeMessages, safeHistory } from './core.mjs';
+import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, tabSwitchIntent, tabCloseIntent, siteOpenIntent, browserActionIntent, makeMessages, safeHistory } from './core.mjs';
 import { openYouTubeMusic } from './youtube.mjs';
-import { switchTabByName, switchTabById, executeBrowserTool } from './browser-tools.mjs';
+import { switchTabByName, switchTabById, closeTabById, closeTabByName, closeTabsByName, closeCurrentTab, executeBrowserTool } from './browser-tools.mjs';
 import { runBrowserAgent } from './agent.mjs';
 import { confirmationsEnabled, approvalForRequest } from './approval-policy.mjs';
+import { startWorkPointer } from './work-pointer.mjs';
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -11,7 +12,7 @@ const ui = {
   prompt: $('prompt'), form: $('chat-form'), send: $('send-button'), stop: $('stop-button'),
   page: $('page-button'), selection: $('selection-button'), agent: $('agent-button'), contextHint: $('context-hint'),
   modelSelect: $('model-select'), footerModel: $('footer-model'), settings: $('settings'), confirmActions: $('confirm-actions'),
-  originCommand: $('origin-command'), toast: $('toast')
+  originCommand: $('origin-command'), toast: $('toast'), workCursor: $('work-cursor')
 };
 let history = [];
 let model = DEFAULT_MODEL;
@@ -24,6 +25,7 @@ let requestController = null;
 let requestId = 0;
 let preparing = false;
 let toastTimer = null;
+let workPointer = null;
 
 const originCommand = `[Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS','chrome-extension://${chrome.runtime.id}','User')`;
 ui.originCommand.textContent = originCommand;
@@ -38,7 +40,7 @@ function toast(text) {
 function updateContextUI() {
   ui.confirmActions.checked = confirmActions;
   ui.agent.classList.toggle('unconfirmed', !confirmActions);
-  ui.agent.title = confirmActions ? 'Режим действий: открыть сайт, нажать и ввести с подтверждением' : 'Внимание: действия без подтверждения — изменить можно в настройках';
+  ui.agent.title = confirmActions ? 'Режим действий: вкладки, сайты, клики и ввод с подтверждением' : 'Внимание: действия без подтверждения — изменить можно в настройках';
   ui.page.classList.toggle('active', pageEnabled);
   ui.page.setAttribute('aria-pressed', String(pageEnabled));
   ui.selection.classList.toggle('active', Boolean(selectionContext));
@@ -48,6 +50,9 @@ function updateContextUI() {
 }
 
 function updateBusy(busy) {
+  ui.workCursor.classList.toggle('hidden', !busy);
+  if (busy && !workPointer) workPointer = startWorkPointer(chrome, requestController?.signal);
+  if (!busy && workPointer) { workPointer.stop(); workPointer = null; }
   ui.send.classList.toggle('hidden', busy);
   ui.stop.classList.toggle('hidden', !busy);
   ui.prompt.disabled = busy;
@@ -386,7 +391,7 @@ function askApproval({ title, detail, site }, signal) {
   });
 }
 
-function showTabChoices(reply, matches, request) {
+function showTabChoices(reply, matches, request, operation = 'switch') {
   const choices = document.createElement('div');
   choices.className = 'tab-choices';
   for (const [index, tab] of matches.entries()) {
@@ -394,7 +399,7 @@ function showTabChoices(reply, matches, request) {
     let host = '';
     try { host = new URL(tab.url).hostname; } catch { host = tab.url; }
     button.type = 'button';
-    button.textContent = `${index + 1}. ${tab.title} · ${host} · окно ${tab.windowId}, вкладка ${tab.id}`;
+    button.textContent = `${index + 1}. ${operation === 'close' ? 'Закрыть' : 'Перейти'}: ${tab.title} · ${host} · окно ${tab.windowId}, вкладка ${tab.id}`;
     button.addEventListener('click', async () => {
       if (request !== requestId || requestController) return;
       choices.querySelectorAll('button').forEach(item => { item.disabled = true; });
@@ -402,7 +407,8 @@ function showTabChoices(reply, matches, request) {
       requestController = controller;
       updateBusy(true);
       try {
-        const result = await switchTabById(chrome, tab);
+        const approve = approvalForRequest(confirmActions, askApproval, controller.signal);
+        const result = operation === 'close' ? await closeTabById(chrome, tab, approve, controller.signal) : await switchTabById(chrome, tab);
         if (request !== requestId) return;
         const answer = result.message;
         renderAssistant(reply.bubble, answer);
@@ -410,7 +416,7 @@ function showTabChoices(reply, matches, request) {
         history[history.length - 1] = { role: 'assistant', content: answer };
         await saveHistory();
       } catch (error) {
-        if (request === requestId) renderAssistant(reply.bubble, `Не удалось переключиться: ${String(error.message || error).slice(0, 180)}`);
+        if (request === requestId) renderAssistant(reply.bubble, `Не удалось выполнить действие: ${String(error.message || error).slice(0, 180)}`);
       } finally {
         if (request === requestId) { requestController = null; updateBusy(false); }
       }
@@ -421,7 +427,7 @@ function showTabChoices(reply, matches, request) {
   scrollDown();
 }
 
-async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
+async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null, closeTarget = null) {
   const controller = new AbortController();
   const approve = approvalForRequest(confirmActions, askApproval, controller.signal);
   requestController = controller;
@@ -430,14 +436,18 @@ async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
   addMessage('user', prompt);
   ui.prompt.value = '';
   ui.prompt.style.height = '';
-  const reply = addMessage('assistant', tabTarget ? 'Ищу вкладку…' : siteTarget ? 'Проверяю адрес…' : 'Начинаю действия…');
+  const reply = addMessage('assistant', closeTarget ? 'Ищу вкладку для закрытия…' : tabTarget ? 'Ищу вкладку…' : siteTarget ? 'Проверяю адрес…' : 'Начинаю действия…');
   reply.bubble.classList.add('typing');
   updateBusy(true);
   await saveHistory();
   let matches = null;
   try {
     let answer;
-    if (tabTarget) {
+    if (closeTarget) {
+      const result = closeTarget.current ? await closeCurrentTab(chrome, approve, controller.signal) : closeTarget.all ? await closeTabsByName(chrome, closeTarget.query, approve, controller.signal) : await closeTabByName(chrome, closeTarget.query, approve, controller.signal);
+      answer = result.message;
+      matches = result.matches;
+    } else if (tabTarget) {
       const result = await switchTabByName(chrome, tabTarget);
       answer = result.message;
       matches = result.matches;
@@ -469,7 +479,7 @@ async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
       reply.bubble.classList.remove('typing');
       requestController = null;
       updateBusy(false);
-      if (matches) showTabChoices(reply, matches, id);
+      if (matches) showTabChoices(reply, matches, id, closeTarget ? 'close' : 'switch');
       ui.prompt.focus();
     }
   }
@@ -478,6 +488,8 @@ async function runBrowserRequest(prompt, tabTarget = null, siteTarget = null) {
 async function sendQuestion(question) {
   const prompt = question.trim().slice(0, PROMPT_LIMIT);
   if (!prompt || requestController || preparing) return;
+  const closeTarget = tabCloseIntent(prompt);
+  if (closeTarget) return runBrowserRequest(prompt, null, null, closeTarget);
   const tabTarget = tabSwitchIntent(prompt) || (pendingTabTarget && prompt.toLocaleLowerCase('ru') === pendingTabTarget.toLocaleLowerCase('ru') ? pendingTabTarget : null);
   if (tabTarget) return runBrowserRequest(prompt, tabTarget);
   const siteTarget = siteOpenIntent(prompt);
@@ -574,7 +586,7 @@ ui.confirmActions.addEventListener('change', async () => {
     await chrome.storage.local.set({ confirmActions: next });
     confirmActions = next;
     updateContextUI();
-    toast(next ? 'Подтверждения действий включены.' : 'Подтверждения отключены. Проверяйте задачи: клики могут отправить сообщения и формы.');
+    toast(next ? 'Подтверждения действий включены.' : 'Подтверждения отключены. Клики могут отправить формы, а команды — закрыть вкладки.');
   } catch {
     ui.confirmActions.checked = confirmActions;
     toast('Не удалось сохранить настройку. Прежнее значение сохранено.');
@@ -630,6 +642,7 @@ $('new-chat').addEventListener('click', async () => {
   ui.prompt.focus();
 });
 ui.stop.addEventListener('click', () => requestController?.abort());
+window.addEventListener('pagehide', () => { requestController?.abort(); workPointer?.stop(); workPointer = null; });
 $('settings-button').addEventListener('click', openSettings);
 $('close-settings').addEventListener('click', closeSettings);
 document.addEventListener('keydown', event => {

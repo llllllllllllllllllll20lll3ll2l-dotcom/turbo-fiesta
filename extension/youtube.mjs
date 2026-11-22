@@ -85,26 +85,30 @@ export async function clickVideoCandidate(videoId) {
   if (!link) return { clicked: false };
   const card = link.closest?.('yt-lockup-view-model, ytd-video-renderer, ytd-rich-item-renderer') || link;
   card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  const host = document.createElement('div');
-  host.setAttribute('data-pero-agent-pointer', '');
-  host.style.cssText = 'position:fixed;left:36px;top:112px;width:34px;height:38px;z-index:2147483647;pointer-events:none;transition:left .55s ease,top .55s ease;filter:drop-shadow(0 2px 3px #0009);';
-  const shadow = host.attachShadow({ mode: 'closed' });
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 34 38');
-  svg.setAttribute('width', '34');
-  svg.setAttribute('height', '38');
-  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  arrow.setAttribute('d', 'M2 2v28l7-7 6 12 5-3-6-12h13Z');
-  arrow.setAttribute('fill', '#111114');
-  arrow.setAttribute('stroke', '#fff');
-  arrow.setAttribute('stroke-width', '2');
-  arrow.setAttribute('stroke-linejoin', 'round');
-  svg.append(arrow);
-  const badge = document.createElement('span');
-  badge.textContent = 'Перо';
-  badge.style.cssText = 'position:absolute;top:20px;left:20px;background:#111114;color:#fff;border:1px solid #fff;border-radius:8px;padding:3px 7px;font:600 11px Arial,sans-serif;white-space:nowrap;';
-  shadow.append(svg, badge);
-  document.documentElement.append(host);
+  let host = document.querySelector('[data-pero-work-pointer]');
+  const persistent = Boolean(host);
+  if (!host) {
+    host = document.createElement('div');
+    host.setAttribute('data-pero-agent-pointer', '');
+    host.style.cssText = 'position:fixed;left:36px;top:112px;width:34px;height:38px;z-index:2147483647;pointer-events:none;transition:left .55s ease,top .55s ease;filter:drop-shadow(0 2px 3px #0009);';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 34 38');
+    svg.setAttribute('width', '34');
+    svg.setAttribute('height', '38');
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrow.setAttribute('d', 'M2 2v28l7-7 6 12 5-3-6-12h13Z');
+    arrow.setAttribute('fill', '#111114');
+    arrow.setAttribute('stroke', '#fff');
+    arrow.setAttribute('stroke-width', '2');
+    arrow.setAttribute('stroke-linejoin', 'round');
+    svg.append(arrow);
+    const badge = document.createElement('span');
+    badge.textContent = 'Перо';
+    badge.style.cssText = 'position:absolute;top:20px;left:20px;background:#111114;color:#fff;border:1px solid #fff;border-radius:8px;padding:3px 7px;font:600 11px Arial,sans-serif;white-space:nowrap;';
+    shadow.append(svg, badge);
+    document.documentElement.append(host);
+  }
   host.getBoundingClientRect();
   const linkRect = link.getBoundingClientRect();
   const rect = linkRect.width && linkRect.height ? linkRect : card.getBoundingClientRect();
@@ -112,7 +116,7 @@ export async function clickVideoCandidate(videoId) {
   host.style.top = `${Math.max(8, Math.min(innerHeight - 40, rect.top + Math.min(rect.height / 2, 35)))}px`;
   await new Promise(resolve => setTimeout(resolve, 1050));
   link.click();
-  setTimeout(() => host.remove(), 2200);
+  if (!persistent) setTimeout(() => host.remove(), 2200);
   return { clicked: true };
 }
 

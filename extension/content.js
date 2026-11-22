@@ -1,11 +1,13 @@
 // Runs only in normal web pages. It never reads a page until the user asks from the panel.
 (() => {
-  if (globalThis.__PERO_CONTENT_READY__) return;
-  globalThis.__PERO_CONTENT_READY__ = true;
+  if (globalThis.__PERO_CONTENT_VERSION__ === '1.5.0') return;
+  globalThis.__PERO_CONTENT_VERSION__ = '1.5.0';
   const refs = new Map();
   const sessionId = crypto.randomUUID().slice(0, 8);
   let generation = 0;
   let snapshotTime = 0;
+  let workPointerTimer = null;
+  let workPointerLastSeen = 0;
   const sensitive = /password|парол|passcode|otp|код.?подтвержд|card.?number|credit.?card|cvv|cvc|iban|номер.?карт/i;
   const forbidden = /pay|оплат|купить|checkout|purchase|order now|place order|заказат|плат[её]ж|перевести деньги|transfer funds/i;
   const allowedTypes = new Set(['text', 'search', 'email', 'url', 'number', 'tel']);
@@ -85,7 +87,40 @@
     }
     return { title: document.title.slice(0, 150), url: location.href.slice(0, 250), text: textOfPage(), elements };
   }
+  function workPointer(token) {
+    if (typeof token !== 'string' || !/^[a-z0-9]{6,16}$/.test(token)) throw new Error('Некорректный указатель.');
+    const existing = document.querySelector('[data-pero-work-pointer]');
+    workPointerLastSeen = Date.now();
+    if (existing?.getAttribute('data-pero-work-pointer') === token) return;
+    existing?.remove();
+    const host = document.createElement('div');
+    host.setAttribute('data-pero-work-pointer', token);
+    host.style.cssText = 'position:fixed;left:65%;top:40%;z-index:2147483647;pointer-events:none;transition:left .45s ease,top .45s ease;filter:drop-shadow(0 2px 4px #0009)';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = '@keyframes pero-cursor-idle{0%,100%{transform:translate(0,0)}50%{transform:translate(6px,5px)}}svg{width:35px;height:40px;animation:pero-cursor-idle 1.3s ease-in-out infinite}';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 34 38');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M2 2v28l7-7 6 12 5-3-6-12h13Z');
+    path.setAttribute('fill', '#111114'); path.setAttribute('stroke', 'white'); path.setAttribute('stroke-width', '2');
+    svg.append(path); shadow.append(style, svg); document.documentElement.append(host);
+    clearInterval(workPointerTimer);
+    workPointerTimer = setInterval(() => {
+      if (Date.now() - workPointerLastSeen < 5500) return;
+      document.querySelector('[data-pero-work-pointer]')?.remove();
+      clearInterval(workPointerTimer);
+      workPointerTimer = null;
+    }, 1800);
+  }
   function pointer(el) {
+    const work = document.querySelector('[data-pero-work-pointer]');
+    if (work) {
+      const rect = el.getBoundingClientRect();
+      work.style.left = `${Math.max(8, Math.min(innerWidth - 40, rect.left + Math.min(rect.width / 2, 100)))}px`;
+      work.style.top = `${Math.max(8, Math.min(innerHeight - 40, rect.top + Math.min(rect.height / 2, 30)))}px`;
+      return;
+    }
     const old = document.querySelector('[data-pero-agent-pointer]');
     old?.remove();
     const host = document.createElement('div');
@@ -105,11 +140,23 @@
     setTimeout(() => host.remove(), 1600);
   }
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id || msg?.source !== 'pero-panel') return;
+    if (sender.id !== chrome.runtime.id || (msg?.source !== 'pero-panel' && msg?.source !== 'pero-work-pointer')) return;
+    if (msg.source === 'pero-work-pointer' && !['POINTER_START', 'POINTER_STOP'].includes(msg.action)) return;
+    if (msg.source === 'pero-panel' && ['POINTER_START', 'POINTER_STOP'].includes(msg.action)) return;
     try {
       let result;
       switch (msg.action) {
         case 'PING': result = { ok: true }; break;
+        case 'POINTER_START': workPointer(msg.token); result = { visible: true }; break;
+        case 'POINTER_STOP': {
+          const host = document.querySelector('[data-pero-work-pointer]');
+          if (host?.getAttribute('data-pero-work-pointer') === msg.token) {
+            host.remove();
+            clearInterval(workPointerTimer);
+            workPointerTimer = null;
+          }
+          result = { visible: false }; break;
+        }
         case 'SNAPSHOT': result = snapshot(); break;
         case 'INSPECT': result = describe(getRef(msg.ref)); break;
         case 'CLICK': {

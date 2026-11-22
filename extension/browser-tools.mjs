@@ -16,7 +16,7 @@ export function rankTab(tab, target) {
 export async function listTabs(api) {
   const tabs = await api.tabs.query({});
   return tabs.filter(tab => !tab.incognito && tab.id && tab.windowId)
-    .map(tab => ({ id: tab.id, windowId: tab.windowId, title: String(tab.title || 'Без названия').slice(0, 110), url: String(tab.url || '').slice(0, 240), active: Boolean(tab.active) }));
+    .map(tab => ({ id: tab.id, windowId: tab.windowId, title: String(tab.title || 'Без названия').slice(0, 110), url: String(tab.url || '').slice(0, 240), active: Boolean(tab.active), pinned: Boolean(tab.pinned) }));
 }
 
 export async function switchTabById(api, requested) {
@@ -42,6 +42,69 @@ export async function switchTabByName(api, target) {
     return { ok: false, message: `Найдено несколько вкладок «${String(target).slice(0, 65)}». Выберите нужную ниже.`, matches: matches.filter(item => item.score === matches[0].score).slice(0, 8) };
   }
   return switchTabById(api, matches[0]);
+}
+
+export async function closeTabById(api, requested, approve, signal) {
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const tab = (await listTabs(api)).find(item => item.id === requested.id && item.windowId === requested.windowId);
+  if (!tab || tab.title !== requested.title || tab.url !== requested.url) {
+    return { ok: false, message: 'Вкладка изменилась или уже закрыта. Повторите запрос.' };
+  }
+  if (tab.pinned) return { ok: false, message: 'Закреплённую вкладку агент не закрывает. Сначала открепите её вручную.' };
+  const detail = `${tab.title}\n${tab.url || 'Служебная вкладка'}\nОкно ${tab.windowId}, вкладка ${tab.id}. Несохранённые данные могут быть потеряны.`;
+  if (!await approve?.({ title: 'Закрыть вкладку?', detail, site: 'Браузер' })) return { denied: true, message: 'Закрытие отменено.' };
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const current = (await listTabs(api)).find(item => item.id === tab.id && item.windowId === tab.windowId);
+  if (!current || current.title !== tab.title || current.url !== tab.url || current.pinned) {
+    return { ok: false, message: 'Вкладка изменилась после подтверждения. Закрытие отменено.' };
+  }
+  await api.tabs.remove(tab.id);
+  if ((await listTabs(api)).some(item => item.id === tab.id)) {
+    return { ok: false, message: `Браузер не подтвердил закрытие вкладки «${tab.title}».` };
+  }
+  return { ok: true, message: `Закрыл вкладку «${tab.title}» (окно ${tab.windowId}).` };
+}
+
+export async function closeTabByName(api, query, approve, signal) {
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const tabs = await listTabs(api);
+  const matches = tabs.map(tab => ({ ...tab, score: rankTab(tab, query) })).filter(tab => tab.score > 0).sort((a, b) => b.score - a.score);
+  if (!matches.length) return { ok: false, message: `Открытая вкладка «${String(query).slice(0, 65)}» не найдена.` };
+  if (matches.length > 1 && matches[0].score === matches[1].score) {
+    return { ok: false, message: `Найдено несколько вкладок «${String(query).slice(0, 65)}». Выберите, какую закрыть.`, matches: matches.filter(item => item.score === matches[0].score).slice(0, 8) };
+  }
+  return closeTabById(api, matches[0], approve, signal);
+}
+
+export async function closeTabsByName(api, query, approve, signal) {
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const tabs = (await listTabs(api)).map(tab => ({ ...tab, score: rankTab(tab, query) })).filter(tab => tab.score > 0);
+  const best = Math.max(0, ...tabs.map(tab => tab.score));
+  const matches = tabs.filter(tab => tab.score === best);
+  if (!matches.length) return { ok: false, message: `Вкладки «${String(query).slice(0, 65)}» не найдены.` };
+  if (matches.length > 8) return { ok: false, message: `Найдено ${matches.length} вкладок. Для безопасности ограничение — 8 за запрос.` };
+  if (matches.some(tab => tab.pinned)) return { ok: false, message: 'Среди найденных есть закреплённые вкладки. Сначала открепите их вручную.' };
+  const detail = matches.map(tab => `${tab.title} — ${tab.url || 'Служебная вкладка'} (окно ${tab.windowId}, №${tab.id})`).join('\n').slice(0, 1100);
+  if (!await approve?.({ title: `Закрыть вкладки (${matches.length})?`, detail: `${detail}\nНесохранённые данные могут быть потеряны.`, site: 'Браузер' })) return { denied: true, message: 'Закрытие отменено.' };
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const latest = await listTabs(api);
+  if (matches.some(tab => !latest.some(item => item.id === tab.id && item.windowId === tab.windowId && item.title === tab.title && item.url === tab.url && !item.pinned))) {
+    return { ok: false, message: 'Одна из вкладок изменилась после подтверждения. Закрытие отменено.' };
+  }
+  await api.tabs.remove(matches.map(tab => tab.id));
+  const remaining = await listTabs(api);
+  const notClosed = matches.filter(tab => remaining.some(item => item.id === tab.id));
+  return notClosed.length ? { ok: false, message: `Браузер не подтвердил закрытие ${notClosed.length} вкладок.` } :
+    { ok: true, message: `Закрыл ${matches.length} вкладок по запросу «${String(query).slice(0, 65)}».` };
+}
+
+export async function closeCurrentTab(api, approve, signal) {
+  if (signal?.aborted) throw new DOMException('Остановлено', 'AbortError');
+  const [active] = await api.tabs.query({ active: true, currentWindow: true });
+  if (!active?.id || active.incognito) return { ok: false, message: 'Не удалось определить текущую обычную вкладку.' };
+  const tab = (await listTabs(api)).find(item => item.id === active.id && item.windowId === active.windowId);
+  if (!tab) return { ok: false, message: 'Текущая вкладка недоступна.' };
+  return closeTabById(api, tab, approve, signal);
 }
 
 export function safeWebUrl(value) {
@@ -86,6 +149,17 @@ export async function executeBrowserTool(api, name, args, approve, signal) {
   if (name === 'switch_tab') {
     const result = await switchTabByName(api, String(input.query || '').slice(0, 65));
     return { ok: result.ok, message: result.message };
+  }
+  if (name === 'close_tabs') {
+    const query = String(input.query || '').trim().slice(0, 65);
+    if (!query) return { ok: false, message: 'Укажите название вкладок, которые надо закрыть.' };
+    return closeTabsByName(api, query, approve, signal);
+  }
+  if (name === 'close_tab') {
+    const query = String(input.query || '').trim().slice(0, 65);
+    const result = input.current === true ? await closeCurrentTab(api, approve, signal) :
+      query ? await closeTabByName(api, query, approve, signal) : { ok: false, message: 'Укажите название вкладки или current: true.' };
+    return { ok: result.ok, denied: result.denied, message: result.message, matches: result.matches?.map(({ title, url, id, windowId }) => ({ title, url, id, windowId })) };
   }
   if (name === 'read_page') {
     const page = await sendToPage(api, 'SNAPSHOT');
@@ -132,7 +206,7 @@ export async function executeBrowserTool(api, name, args, approve, signal) {
     }
     if (!text) throw new Error('Пустой текст не вводится.');
     await sendToPage(api, 'TYPE', { ref, text, expected: { label: info.label, text } }, tab);
-    return { ok: true, message: 'Текст введён. Отправка формы потребует отдельного подтверждения.' };
+    return { ok: true, message: 'Текст введён. Дальнейший клик по кнопке отправки — отдельное действие (согласно настройке подтверждений).' };
   }
   throw new Error('Недоступная команда браузера.');
 }

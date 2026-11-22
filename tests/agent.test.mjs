@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tabSwitchIntent, siteOpenIntent, browserActionIntent } from '../extension/core.mjs';
-import { rankTab, safeWebUrl, switchTabByName, switchTabById, executeBrowserTool } from '../extension/browser-tools.mjs';
+import { tabSwitchIntent, tabCloseIntent, siteOpenIntent, browserActionIntent } from '../extension/core.mjs';
+import { rankTab, safeWebUrl, switchTabByName, switchTabById, closeTabByName, closeTabById, closeTabsByName, closeCurrentTab, executeBrowserTool } from '../extension/browser-tools.mjs';
 import { runBrowserAgent } from '../extension/agent.mjs';
 
 const ref = 'deadbeef:1:2';
@@ -76,6 +76,83 @@ test('routes explicit site commands without hallucinating a domain', () => {
   assert.equal(browserActionIntent('нажми кнопку Отправить'), true);
   assert.equal(browserActionIntent('открой сайт MAX'), true);
   assert.equal(browserActionIntent('какие сайты ты знаешь?'), false);
+  assert.deepEqual(tabCloseIntent('Закрой вкладку MAX'), { query: 'MAX' });
+  assert.deepEqual(tabCloseIntent('закрой текущую вкладку'), { current: true });
+  assert.deepEqual(tabCloseIntent('Закрой вкладку «MAX»'), { query: 'MAX' });
+  assert.deepEqual(tabCloseIntent('Закрой все вкладки MAX'), { query: 'MAX', all: true });
+  assert.deepEqual(tabCloseIntent('Закрой вкладки MAX'), { query: 'MAX', all: true });
+  assert.equal(tabCloseIntent('закрой вкладку MAX и отправь сообщение'), null);
+  assert.equal(browserActionIntent('закрой вкладку MAX'), true);
+});
+
+test('closing by name requires approval, removes only a verified tab and reports success', async () => {
+  const tabs = [{ ...tab, id: 8, active: true }, { ...tab, id: 9, title: 'Другой сайт', active: false }];
+  const removed = [];
+  const api = { tabs: {
+    query: async query => query?.active ? tabs.filter(item => item.active) : tabs,
+    remove: async id => { removed.push(id); tabs.splice(tabs.findIndex(item => item.id === id), 1); }
+  } };
+  const denied = await closeTabByName(api, 'MAX', async () => false);
+  assert.equal(denied.denied, true);
+  assert.deepEqual(removed, []);
+  let confirmation;
+  const result = await closeCurrentTab(api, async details => { confirmation = details; return true; });
+  assert.equal(result.ok, true);
+  assert.match(confirmation.detail, /https:\/\/max.ru/);
+  assert.deepEqual(removed, [8]);
+  assert.equal(tabs.length, 1);
+});
+
+test('duplicate, changed and pinned tabs cannot be closed accidentally', async () => {
+  const tabs = [{ ...tab, id: 8 }, { ...tab, id: 9 }];
+  const removed = [];
+  const api = { tabs: {
+    query: async () => tabs,
+    remove: async id => { removed.push(id); tabs.splice(tabs.findIndex(item => item.id === id), 1); }
+  } };
+  const ambiguous = await closeTabByName(api, 'MAX', async () => true);
+  assert.equal(ambiguous.ok, false);
+  assert.equal(ambiguous.matches.length, 2);
+  assert.deepEqual(removed, []);
+  const changed = await closeTabById(api, ambiguous.matches[0], async () => { tabs[0].title = 'Новая страница'; return true; });
+  assert.equal(changed.ok, false);
+  assert.deepEqual(removed, []);
+  tabs[1].pinned = true;
+  const pinned = await closeTabById(api, ambiguous.matches[1], async () => true);
+  assert.equal(pinned.ok, false);
+  assert.deepEqual(removed, []);
+});
+
+test('explicit plural close removes matching tabs together, but not unrelated tabs', async () => {
+  const tabs = [{ ...tab, id: 8 }, { ...tab, id: 9 }, { ...tab, id: 10, title: 'Другой сайт' }];
+  let removed = [];
+  const api = { tabs: {
+    query: async () => tabs,
+    remove: async ids => { removed = ids; for (const id of ids) tabs.splice(tabs.findIndex(item => item.id === id), 1); }
+  } };
+  const result = await closeTabsByName(api, 'MAX', async details => {
+    assert.match(details.title, /\(2\)/);
+    return true;
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(removed, [8, 9]);
+  assert.equal(tabs[0].id, 10);
+});
+
+test('bulk close refuses pinned tabs and large groups', async () => {
+  const tabs = Array.from({ length: 9 }, (_, i) => ({ ...tab, id: i + 1 }));
+  const api = { tabs: { query: async () => tabs, remove: async () => { throw Error('must not remove'); } } };
+  assert.match((await closeTabsByName(api, 'MAX', async () => true)).message, /8 за запрос/);
+  tabs.pop();
+  tabs[0].pinned = true;
+  assert.match((await closeTabsByName(api, 'MAX', async () => true)).message, /закреплённые/);
+});
+
+test('close_tab is available as a model tool but requires a target', async () => {
+  const { api } = mockApi();
+  const result = await executeBrowserTool(api, 'close_tab', {}, async () => true);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /название/);
 });
 
 test('rejects private and non-web addresses and credentials', () => {
@@ -145,6 +222,21 @@ test('abort after approval prevents a new navigation', async () => {
     controller.abort(); return true;
   }, controller.signal), /Остановлено/);
   assert.equal(events.length, 0);
+});
+
+test('model cannot bulk-close tabs unless the user explicitly requests all', async () => {
+  const oldFetch = globalThis.fetch;
+  let requests = 0;
+  let removed = false;
+  const api = { tabs: { query: async () => [tab], remove: async () => { removed = true; } } };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ message: requests++ === 0
+    ? { tool_calls: [{ function: { name: 'close_tabs', arguments: { query: 'MAX' } } }] }
+    : { content: 'Невозможно закрыть все вкладки без явного запроса.' } }) });
+  try {
+    const result = await runBrowserAgent({ prompt: 'закрой вкладку MAX', model: 'test-model', api, approve: async () => true });
+    assert.equal(removed, false);
+    assert.match(result.actions[0].result, /Массовое закрытие/);
+  } finally { globalThis.fetch = oldFetch; }
 });
 
 test('agent sends tool calls to Ollama and stops on user denial', async () => {

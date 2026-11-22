@@ -21,6 +21,7 @@
       </div>
     </header>
 
+    <div class="work-cursor hidden" id="work-cursor" aria-hidden="true" title="Перо работает"><svg viewBox="0 0 34 38" width="36" height="40"><path d="M2 2v28l7-7 6 12 5-3-6-12h13Z" fill="#111114" stroke="white" stroke-width="2"/></svg></div>
     <div class="connection" id="connection" role="status" aria-live="polite"><span class="connection-dot"></span><span id="connection-label">Проверяем Ollama…</span><span class="connection-model" id="connection-model"></span></div>
 
     <main class="main" id="main">
@@ -62,8 +63,8 @@
         <button class="secondary-button" id="refresh-models">↻ &nbsp; Обновить список моделей</button>
         <div class="settings-divider"></div>
         <p class="field-label">Браузерные действия</p>
-        <label class="approval-setting" for="confirm-actions"><span><strong>Спрашивать подтверждение</strong><small>Перед открытием сайтов, кликами и вводом текста</small></span><input id="confirm-actions" type="checkbox" checked aria-describedby="confirmation-warning"></label>
-        <p class="confirmation-warning" id="confirmation-warning">Если выключить: Перо сможет открывать сайты, нажимать кнопки и вводить текст без дополнительных запросов. Клик по «Отправить» может сразу отправить сообщение или форму. Используйте только если доверяете задаче и сайту. Пароли и платежи по-прежнему ограничены.</p>
+        <label class="approval-setting" for="confirm-actions"><span><strong>Спрашивать подтверждение</strong><small>Перед открытием сайтов, закрытием вкладок, кликами и вводом текста</small></span><input id="confirm-actions" type="checkbox" checked aria-describedby="confirmation-warning"></label>
+        <p class="confirmation-warning" id="confirmation-warning">Если выключить: Перо сможет открывать сайты, закрывать вкладки, нажимать кнопки и вводить текст без дополнительных запросов. Клик по «Отправить» может сразу отправить сообщение или форму. Используйте только если доверяете задаче и сайту. Пароли и платежи по-прежнему ограничены.</p>
         <div class="settings-divider"></div>
         <p class="field-label">Подключение</p>
         <p class="muted-text">Адрес: <span class="mono">127.0.0.1:11434</span>. Доступ с других устройств не нужен.</p>
