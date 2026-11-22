@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Перо — локальный ИИ",
   "short_name": "Перо AI",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Локальный ИИ в боковой панели браузера. Работает с Ollama на вашем компьютере.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage", "scripting", "tabs"],

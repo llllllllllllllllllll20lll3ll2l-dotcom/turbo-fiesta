@@ -1,18 +1,21 @@
-import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, makeMessages, safeHistory } from './core.mjs';
+import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, tabSwitchIntent, makeMessages, safeHistory } from './core.mjs';
 import { openYouTubeMusic } from './youtube.mjs';
+import { switchTabByName } from './browser-tools.mjs';
+import { runBrowserAgent } from './agent.mjs';
 
 const $ = id => document.getElementById(id);
 const ui = {
   main: $('main'), welcome: $('welcome'), messages: $('messages'),
   connection: $('connection'), connectionLabel: $('connection-label'), connectionModel: $('connection-model'),
   prompt: $('prompt'), form: $('chat-form'), send: $('send-button'), stop: $('stop-button'),
-  page: $('page-button'), selection: $('selection-button'), contextHint: $('context-hint'),
+  page: $('page-button'), selection: $('selection-button'), agent: $('agent-button'), contextHint: $('context-hint'),
   modelSelect: $('model-select'), footerModel: $('footer-model'), settings: $('settings'),
   originCommand: $('origin-command'), toast: $('toast')
 };
 let history = [];
 let model = DEFAULT_MODEL;
 let pageEnabled = false;
+let agentEnabled = false;
 let selectionContext = null;
 let requestController = null;
 let requestId = 0;
@@ -44,6 +47,7 @@ function updateBusy(busy) {
   ui.prompt.disabled = busy;
   ui.page.disabled = busy;
   ui.selection.disabled = busy;
+  ui.agent.disabled = busy;
 }
 
 function scrollDown() {
@@ -348,12 +352,89 @@ async function runYouTubeRequest(prompt, intent) {
   }
 }
 
+function askApproval({ title, detail, site }, signal) {
+  return new Promise(resolve => {
+    const box = $('approval');
+    const yes = $('approval-yes');
+    const no = $('approval-no');
+    $('approval-title').textContent = String(title).slice(0, 180);
+    $('approval-detail').textContent = String(detail).slice(0, 1000);
+    $('approval-site').textContent = `Сайт: ${String(site).slice(0, 180)}`;
+    box.classList.remove('hidden');
+    const finish = value => {
+      box.classList.add('hidden');
+      yes.removeEventListener('click', accept);
+      no.removeEventListener('click', decline);
+      signal.removeEventListener('abort', decline);
+      document.removeEventListener('keydown', escape);
+      resolve(value && !signal.aborted);
+    };
+    const accept = () => finish(true);
+    const decline = () => finish(false);
+    const escape = event => { if (event.key === 'Escape') { event.preventDefault(); decline(); } };
+    yes.addEventListener('click', accept);
+    no.addEventListener('click', decline);
+    signal.addEventListener('abort', decline, { once: true });
+    document.addEventListener('keydown', escape);
+    if (signal.aborted) decline(); else no.focus();
+  });
+}
+
+async function runBrowserRequest(prompt, tabTarget = null) {
+  const controller = new AbortController();
+  requestController = controller;
+  const id = ++requestId;
+  history.push({ role: 'user', content: prompt });
+  addMessage('user', prompt);
+  ui.prompt.value = '';
+  ui.prompt.style.height = '';
+  const reply = addMessage('assistant', tabTarget ? 'Ищу вкладку…' : 'Начинаю действия…');
+  reply.bubble.classList.add('typing');
+  updateBusy(true);
+  await saveHistory();
+  try {
+    let answer;
+    if (tabTarget) {
+      const result = await switchTabByName(chrome, tabTarget);
+      answer = result.message;
+    } else {
+      const result = await runBrowserAgent({ prompt, model, signal: controller.signal, approve: item => askApproval(item, controller.signal), onProgress: text => {
+        if (id === requestId && !controller.signal.aborted) { renderAssistant(reply.bubble, text); scrollDown(); }
+      } });
+      answer = result.answer;
+      if (result.actions.length) answer += `\n\nПроверенные шаги: ${result.actions.map(step => `${step.name}: ${String(step.result).slice(0, 100)}`).join('; ').slice(0, 700)}`;
+    }
+    if (id !== requestId) return;
+    if (controller.signal.aborted) answer = 'Остановлено. Уже выполненные действия в браузере не отменены.';
+    renderAssistant(reply.bubble, answer);
+    history.push({ role: 'assistant', content: answer });
+    await saveHistory();
+  } catch (error) {
+    if (id !== requestId) return;
+    const answer = error.name === 'AbortError' ? 'Остановлено. Уже выполненные действия в браузере не отменены.' :
+      `Не удалось выполнить действие: ${String(error.message || error).slice(0, 220)}`;
+    renderAssistant(reply.bubble, answer);
+    history.push({ role: 'assistant', content: answer });
+    await saveHistory();
+  } finally {
+    if (id === requestId) {
+      reply.bubble.classList.remove('typing');
+      requestController = null;
+      updateBusy(false);
+      ui.prompt.focus();
+    }
+  }
+}
+
 async function sendQuestion(question) {
   const prompt = question.trim().slice(0, PROMPT_LIMIT);
   if (!prompt || requestController || preparing) return;
+  const tabTarget = tabSwitchIntent(prompt);
+  if (tabTarget) return runBrowserRequest(prompt, tabTarget);
   const youtube = youtubeMusicIntent(prompt);
   if (youtube) return runYouTubeRequest(prompt, youtube);
   if (!model) { toast('Сначала подключите Ollama и скачайте модель.'); openSettings(); return; }
+  if (agentEnabled) return runBrowserRequest(prompt);
   preparing = true;
   const preparationId = requestId;
   let context = selectionContext;
@@ -427,6 +508,12 @@ ui.prompt.addEventListener('keydown', event => {
 ui.prompt.addEventListener('input', () => {
   ui.prompt.style.height = 'auto';
   ui.prompt.style.height = `${Math.min(ui.prompt.scrollHeight, 116)}px`;
+});
+ui.agent.addEventListener('click', () => {
+  agentEnabled = !agentEnabled;
+  ui.agent.classList.toggle('active', agentEnabled);
+  ui.agent.setAttribute('aria-pressed', String(agentEnabled));
+  toast(agentEnabled ? 'Режим действий включён. Открытие сайта, клики и ввод требуют отдельного подтверждения.' : 'Режим действий выключен.');
 });
 ui.page.addEventListener('click', () => {
   pageEnabled = !pageEnabled;

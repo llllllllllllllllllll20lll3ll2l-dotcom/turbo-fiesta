@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Перо — локальный ИИ</title>
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="agent.css">
 </head>
 <body>
   <div class="app">
@@ -42,6 +43,7 @@
       <div class="context-row">
         <button class="context-button" id="page-button" type="button" aria-pressed="false" title="При отправке добавлять текст текущей страницы">▤ <span>Страница</span></button>
         <button class="context-button" id="selection-button" type="button" title="Добавить выделенный на странице текст">✳ <span>Выделение</span></button>
+        <button class="context-button" id="agent-button" type="button" aria-pressed="false" title="Режим действий: вкладки, сайты, клики и ввод с подтверждением">✦ <span>Действия</span></button>
         <span class="context-hint" id="context-hint">Текст страницы читается только по вашему запросу</span>
       </div>
       <form class="composer" id="chat-form">
@@ -54,7 +56,7 @@
     <section class="settings hidden" id="settings" aria-label="Настройки" aria-hidden="true">
       <div class="settings-header"><h2>Настройки</h2><button class="icon-button" id="close-settings" aria-label="Закрыть настройки">✕</button></div>
       <div class="settings-body">
-        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Команда для YouTube отдельно открывает сайт в браузере.</p></div></div>
+        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Режим «Действия» работает с открытыми вкладками и сайтами; открытие сайтов, нажатия и ввод требуют подтверждения.</p></div></div>
         <label class="field-label" for="model-select">Нейросеть</label>
         <select id="model-select"><option value="">Загрузка моделей…</option></select>
         <button class="secondary-button" id="refresh-models">↻ &nbsp; Обновить список моделей</button>
@@ -65,9 +67,12 @@
           <div class="command-box"><code id="origin-command"></code><button id="copy-command" title="Скопировать команду" aria-label="Скопировать команду">⧉</button></div>
           <p class="tiny-note">Команда задаёт OLLAMA_ORIGINS для вашего пользователя Windows. Не меняйте OLLAMA_HOST на 0.0.0.0.</p>
         </div>
-        <p class="muted-text privacy-note">Для функции «Страница» браузер запрашивает доступ к сайтам. Перо читает их только по вашему нажатию. Текст страниц не сохраняется в истории. Чаты остаются в хранилище расширения на этом ПК.</p>
+        <p class="muted-text privacy-note">Режим «Действия» читает страницы по вашей просьбе и показывает подтверждение перед открытием сайтов, нажатием кнопок и вводом текста. Не используйте его на страницах с паролями, платёжными данными и личными сообщениями без проверки каждого шага. Текст страниц не сохраняется в истории; чаты остаются на этом ПК.</p>
       </div>
     </section>
+    <div class="approval hidden" id="approval" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-detail">
+      <div class="approval-card"><div class="approval-eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</div><h2 id="approval-title"></h2><p class="approval-site" id="approval-site"></p><p class="approval-detail" id="approval-detail"></p><div class="approval-buttons"><button type="button" id="approval-no">Отмена</button><button type="button" id="approval-yes">Разрешить один раз</button></div></div>
+    </div>
     <div class="toast hidden" id="toast" role="alert"></div>
   </div>
   <script type="module" src="panel.js"></script>
