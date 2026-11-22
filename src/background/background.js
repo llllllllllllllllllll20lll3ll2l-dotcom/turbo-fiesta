@@ -337,8 +337,8 @@ async function runAgent(goal, { assistantText = '' } = {}) {
 
       switch (action.action) {
         case 'answer': {
-          finalAnswer = String(action.params?.text || '').trim();
-          if (!finalAnswer) finalAnswer = '(модель не дала текста ответа)';
+          const text = String(action.params?.text || '').trim();
+          if (text) finalAnswer = text;
           iterations = MAX_STEPS; // выпадим из цикла
           break;
         }
@@ -425,8 +425,7 @@ async function runAgent(goal, { assistantText = '' } = {}) {
           break;
         }
         case 'done': {
-          if (!finalAnswer) finalAnswer = assistantText || 'Готово.';
-          iterations = MAX_STEPS; // выпадим из цикла
+          iterations = MAX_STEPS; // выпадим и сделаем финальный ответ ниже
           break;
         }
       }
@@ -440,7 +439,26 @@ async function runAgent(goal, { assistantText = '' } = {}) {
     }
 
     if (!finalAnswer) {
-      finalAnswer = lastResult || 'Агент выполнил ограниченный цикл действий без явного ответа.';
+      // Модель не дала ответ — финальный прямой вопрос.
+      try {
+        const historyText = history
+          .map((m) => `${m.role}: ${String(m.text ?? m.content ?? '').slice(0, 1500)}`)
+          .join('\n');
+        const finalRes = await chatOnce({
+          baseUrl: settings.ollamaUrl,
+          model: settings.model,
+          messages: [
+            { role: 'system', content: 'Ты — ассистент внутри браузера. Твоя задача — ЧЕСТНО и КРАТКО ответить пользователю. Без JSON, без заголовков, без пояснений.' },
+            { role: 'user', content: `Задача пользователя: ${goal}.\n\nЧто произошло: ${lastResult || '(ничего не произошло)'}.\n\nОтветь пользователю на русском, 1–3 предложениями.` },
+          ],
+          fetchImpl: fetch,
+        });
+        const text = (finalRes.text || '').trim();
+        if (text) finalAnswer = text;
+        else finalAnswer = lastResult || 'Я не смог ответить.';
+      } catch {
+        finalAnswer = lastResult || 'Я не смог ответить.';
+      }
     }
 
     saveChatMessage('assistant', finalAnswer);
