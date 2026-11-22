@@ -32,6 +32,7 @@
           <button class="suggestion" data-action="summary"><span class="suggestion-icon">≡</span><span>Кратко пересказать страницу</span><span class="suggestion-arrow">↗</span></button>
           <button class="suggestion" data-action="explain"><span class="suggestion-icon">✳</span><span>Объяснить выделенный текст</span><span class="suggestion-arrow">↗</span></button>
           <button class="suggestion" data-action="translate"><span class="suggestion-icon">文</span><span>Перевести страницу</span><span class="suggestion-arrow">↗</span></button>
+          <button class="suggestion" data-action="music"><span class="suggestion-icon">♫</span><span>Включить музыку 2000-х</span><span class="suggestion-arrow">↗</span></button>
         </div>
       </section>
       <div class="messages" id="messages" role="log" aria-label="Сообщения чата" aria-live="polite"></div>
@@ -45,7 +46,7 @@
       </div>
       <form class="composer" id="chat-form">
         <textarea id="prompt" rows="1" maxlength="1800" placeholder="Спроси Перо…" aria-label="Ваш вопрос"></textarea>
-        <div class="composer-bottom"><span class="private-label">⌁ <span>Только на этом ПК</span></span><button type="submit" class="send-button" id="send-button" title="Отправить" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><button type="button" class="stop-button hidden" id="stop-button" title="Остановить ответ" aria-label="Остановить ответ"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div>
+        <div class="composer-bottom"><span class="private-label">⌁ <span>Локальная модель</span></span><button type="submit" class="send-button" id="send-button" title="Отправить" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><button type="button" class="stop-button hidden" id="stop-button" title="Остановить ответ" aria-label="Остановить ответ"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div>
       </form>
       <p class="disclaimer">Ответы могут быть неточными. Модель: <span id="footer-model">—</span></p>
     </footer>
@@ -53,7 +54,7 @@
     <section class="settings hidden" id="settings" aria-label="Настройки" aria-hidden="true">
       <div class="settings-header"><h2>Настройки</h2><button class="icon-button" id="close-settings" aria-label="Закрыть настройки">✕</button></div>
       <div class="settings-body">
-        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы отправляются только на ваш компьютер. Облачные модели и аккаунт не нужны.</p></div></div>
+        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Команда для YouTube отдельно открывает сайт в браузере.</p></div></div>
         <label class="field-label" for="model-select">Нейросеть</label>
         <select id="model-select"><option value="">Загрузка моделей…</option></select>
         <button class="secondary-button" id="refresh-models">↻ &nbsp; Обновить список моделей</button>

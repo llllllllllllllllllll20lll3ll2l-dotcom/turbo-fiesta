@@ -1,4 +1,5 @@
-import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, makeMessages, safeHistory } from './core.mjs';
+import { OLLAMA_URL, DEFAULT_MODEL, PAGE_LIMIT, SELECTION_LIMIT, PROMPT_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, makeMessages, safeHistory } from './core.mjs';
+import { openYouTubeMusic } from './youtube.mjs';
 
 const $ = id => document.getElementById(id);
 const ui = {
@@ -293,9 +294,63 @@ async function streamReply(messages, target, controller, id) {
   return answer;
 }
 
+async function runYouTubeRequest(prompt, intent) {
+  const controller = new AbortController();
+  requestController = controller;
+  const id = ++requestId;
+  updateBusy(true);
+  history.push({ role: 'user', content: prompt });
+  addMessage('user', prompt);
+  ui.prompt.value = '';
+  ui.prompt.style.height = '';
+  const reply = addMessage('assistant', 'Открываю YouTube…');
+  reply.bubble.classList.add('typing');
+  await saveHistory();
+  if (id !== requestId) return;
+  try {
+    const result = await openYouTubeMusic(intent, chrome, controller.signal, text => {
+      if (id === requestId) renderAssistant(reply.bubble, text);
+    });
+    if (id !== requestId) return;
+    let answer;
+    if (result.status === 'playing') {
+      answer = result.ad
+        ? `Открыл «${result.title}». Сейчас на YouTube идёт реклама — после неё должно начаться видео. Проверьте вкладку.`
+        : `Открыл «${result.title}» на YouTube. Видеоплеер воспроизводит запись.`;
+    } else if (result.status === 'opened') {
+      answer = `Открыл «${result.title}» на YouTube, но браузер не подтвердил воспроизведение. Нажмите ▶ в открытой вкладке.`;
+    } else {
+      answer = intent.play
+        ? `Открыл результаты поиска «${intent.query}» на YouTube. Не удалось надёжно выбрать и запустить видео — выберите его в открытой вкладке.`
+        : `Открыл результаты поиска «${intent.query}» на YouTube.`;
+    }
+    renderAssistant(reply.bubble, answer);
+    history.push({ role: 'assistant', content: answer });
+    await saveHistory();
+  } catch (error) {
+    if (id !== requestId) return;
+    const answer = error.name === 'AbortError'
+      ? 'Остановлено. Уже открытая вкладка останется доступной.'
+      : `Не удалось выполнить действие в YouTube: ${String(error.message || error).slice(0, 180)}. Проверьте доступность сайта.`;
+    renderAssistant(reply.bubble, answer);
+    history.push({ role: 'assistant', content: answer });
+    await saveHistory();
+  } finally {
+    if (id === requestId) {
+      reply.bubble.classList.remove('typing');
+      requestController = null;
+      updateBusy(false);
+      ui.prompt.focus();
+      scrollDown();
+    }
+  }
+}
+
 async function sendQuestion(question) {
   const prompt = question.trim().slice(0, PROMPT_LIMIT);
   if (!prompt || requestController || preparing) return;
+  const youtube = youtubeMusicIntent(prompt);
+  if (youtube) return runYouTubeRequest(prompt, youtube);
   if (!model) { toast('Сначала подключите Ollama и скачайте модель.'); openSettings(); return; }
   preparing = true;
   const preparationId = requestId;
@@ -387,6 +442,10 @@ ui.selection.addEventListener('click', async () => {
 });
 document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
   const action = button.dataset.action;
+  if (action === 'music') {
+    sendQuestion('Открой YouTube, найди музыку 2000-х и включи её.');
+    return;
+  }
   if (action === 'explain') {
     try { selectionContext = await getContext('selection'); pageEnabled = false; updateContextUI(); }
     catch (error) { toast(error.message); return; }

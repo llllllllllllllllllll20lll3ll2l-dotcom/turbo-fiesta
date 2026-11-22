@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MODEL, OLLAMA_URL, PAGE_LIMIT, SELECTION_LIMIT, splitJsonLines, localModelNames, makeMessages, safeHistory } from '../extension/core.mjs';
+import { DEFAULT_MODEL, OLLAMA_URL, PAGE_LIMIT, SELECTION_LIMIT, splitJsonLines, localModelNames, youtubeMusicIntent, youtubeWatchUrl, makeMessages, safeHistory } from '../extension/core.mjs';
 
 test('Ollama endpoint remains loopback-only', () => {
   assert.equal(OLLAMA_URL, 'http://127.0.0.1:11434');
@@ -13,6 +13,21 @@ test('model picker excludes Ollama cloud models', () => {
     { name: 'gemma4:cloud' },
     { model: 'qwen2.5:3b' }
   ]), ['qwen3:4b-instruct-2507-q4_K_M', 'qwen2.5:3b']);
+});
+
+test('recognizes the requested YouTube playback without hijacking ordinary chat', () => {
+  assert.deepEqual(youtubeMusicIntent('открой ютуб и найди музыку 2000х + включи её'), { query: 'хиты 2000-х музыка сборник', play: true });
+  assert.deepEqual(youtubeMusicIntent('открой YouTube и найди музыку 2000-х'), { query: 'хиты 2000-х музыка сборник', play: false });
+  assert.equal(youtubeMusicIntent('расскажи историю музыки 2000-х'), null);
+  assert.equal(youtubeMusicIntent('открой другой сайт и переведи статью'), null);
+});
+
+test('accepts only canonical YouTube video links', () => {
+  assert.equal(youtubeWatchUrl('/watch?v=dQw4w9WgXcQ&list=foo'), 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.equal(youtubeWatchUrl('https://evil.example/watch?v=dQw4w9WgXcQ'), null);
+  assert.equal(youtubeWatchUrl('//evil.example/watch?v=dQw4w9WgXcQ'), null);
+  assert.equal(youtubeWatchUrl('https://www.youtube.com/redirect?v=dQw4w9WgXcQ'), null);
+  assert.equal(youtubeWatchUrl('javascript:alert(1)'), null);
 });
 
 test('stream parser handles messages split across network reads', () => {
