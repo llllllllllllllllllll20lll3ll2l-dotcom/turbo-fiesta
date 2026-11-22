@@ -23,6 +23,14 @@ function send(msg) {
   });
 }
 
+// ---------- Размер текстового поля ----------
+function autoResize() {
+  const input = $('input');
+  if (!input) return;
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 80) + 'px';
+}
+
 // ---------- Статус ----------
 async function refreshStatus() {
   const resp = await send({ type: 'status:get' });
@@ -314,10 +322,6 @@ function init() {
   const sendBtn = $('btn-send');
   const abortBtn = $('btn-abort');
 
-  function autoResize() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 80) + 'px';
-  }
   input.addEventListener('input', autoResize);
   autoResize();
 
