@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Перо — локальный ИИ</title>
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="agent.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand" aria-label="Перо — локальный ИИ">
+        <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M24.5 5.5C13 5.4 7.4 11.6 7.5 20.7c3.9-4.7 8.9-7.3 15-8.1-5.8 3.1-9.5 7-12.1 12.4 9.2-.3 15.3-6.6 14.1-19.5Z" fill="currentColor"/><path d="M6 26.5c3.3-6.2 8.3-10.3 16.5-14" stroke="#1b1824" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+        <span>Перо <span class="brand-star">✦</span></span>
+      </div>
+      <div class="top-actions">
+        <button class="icon-button" id="new-chat" title="Новый чат" aria-label="Новый чат"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="icon-button" id="settings-button" title="Настройки" aria-label="Настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .4 1.9l.1.1-2.9 2.9-.1-.1a1.7 1.7 0 0 0-1.9-.4 1.7 1.7 0 0 0-1 1.6V21H10v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1-2.9-2.9.1-.1a1.7 1.7 0 0 0 .4-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.4-1.9L4.2 7l2.9-2.9.1.1a1.7 1.7 0 0 0 1.9.4 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.4l.1-.1L20 7l-.1.1a1.7 1.7 0 0 0-.4 1.9 1.7 1.7 0 0 0 1.6 1h.1v4h-.1a1.7 1.7 0 0 0-1.7 1Z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="work-cursor hidden" id="work-cursor" aria-hidden="true" title="Перо работает"><svg viewBox="0 0 34 38" width="36" height="40"><path d="M2 2v28l7-7 6 12 5-3-6-12h13Z" fill="#111114" stroke="white" stroke-width="2"/></svg></div>
+    <div class="connection" id="connection" role="status" aria-live="polite"><span class="connection-dot"></span><span id="connection-label">Проверяем Ollama…</span><span class="connection-model" id="connection-model"></span></div>
+
+    <main class="main" id="main">
+      <section class="welcome" id="welcome">
+        <div class="welcome-aura"><span class="aura-feather">✦</span><span class="aura-small">✧</span></div>
+        <p class="eyebrow">ЛОКАЛЬНЫЙ ИИ · В ВАШЕМ БРАУЗЕРЕ</p>
+        <h1>Начнём работу</h1>
+        <p class="welcome-subtitle">Спросите о чём угодно или позовите меня помочь со страницей.</p>
+        <div class="suggestions">
+          <button class="suggestion" data-action="summary"><span class="suggestion-icon">≡</span><span>Кратко пересказать страницу</span><span class="suggestion-arrow">↗</span></button>
+          <button class="suggestion" data-action="explain"><span class="suggestion-icon">✳</span><span>Объяснить выделенный текст</span><span class="suggestion-arrow">↗</span></button>
+          <button class="suggestion" data-action="translate"><span class="suggestion-icon">文</span><span>Перевести страницу</span><span class="suggestion-arrow">↗</span></button>
+          <button class="suggestion" data-action="music"><span class="suggestion-icon">♫</span><span>Включить музыку 2000-х</span><span class="suggestion-arrow">↗</span></button>
+        </div>
+      </section>
+      <div class="messages" id="messages" role="log" aria-label="Сообщения чата" aria-live="polite"></div>
+    </main>
+
+    <footer class="composer-zone">
+      <div class="context-row">
+        <button class="context-button" id="page-button" type="button" aria-pressed="false" title="При отправке добавлять текст текущей страницы">▤ <span>Страница</span></button>
+        <button class="context-button" id="selection-button" type="button" title="Добавить выделенный на странице текст">✳ <span>Выделение</span></button>
+        <button class="context-button" id="agent-button" type="button" aria-pressed="false" title="Режим действий: вкладки, сайты, клики и ввод с подтверждением">✦ <span>Действия</span></button>
+        <span class="context-hint" id="context-hint">Текст страницы читается только по вашему запросу</span>
+      </div>
+      <form class="composer" id="chat-form">
+        <textarea id="prompt" rows="1" maxlength="1800" placeholder="Спроси Перо…" aria-label="Ваш вопрос"></textarea>
+        <div class="composer-bottom"><span class="private-label">⌁ <span>Локальная модель</span></span><button type="submit" class="send-button" id="send-button" title="Отправить" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><button type="button" class="stop-button hidden" id="stop-button" title="Остановить ответ" aria-label="Остановить ответ"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div>
+      </form>
+      <p class="disclaimer">Ответы могут быть неточными. Модель: <span id="footer-model">—</span></p>
+    </footer>
+
+    <section class="settings hidden" id="settings" aria-label="Настройки" aria-hidden="true">
+      <div class="settings-header"><h2>Настройки</h2><button class="icon-button" id="close-settings" aria-label="Закрыть настройки">✕</button></div>
+      <div class="settings-body">
+        <div class="settings-card"><div class="card-icon">✦</div><div><strong>Локальная Ollama</strong><p>Запросы к модели идут только на ваш компьютер. Режим «Действия» работает с открытыми вкладками и сайтами. Подтверждения действий можно настроить ниже.</p></div></div>
+        <label class="field-label" for="model-select">Нейросеть</label>
+        <select id="model-select"><option value="">Загрузка моделей…</option></select>
+        <button class="secondary-button" id="refresh-models">↻ &nbsp; Обновить список моделей</button>
+        <div class="settings-divider"></div>
+        <p class="field-label">Браузерные действия</p>
+        <label class="approval-setting" for="confirm-actions"><span><strong>Спрашивать подтверждение</strong><small>Перед открытием сайтов, закрытием вкладок, кликами и вводом текста</small></span><input id="confirm-actions" type="checkbox" checked aria-describedby="confirmation-warning"></label>
+        <p class="confirmation-warning" id="confirmation-warning">Если выключить: Перо сможет открывать сайты, закрывать вкладки, нажимать кнопки и вводить текст без дополнительных запросов. Клик по «Отправить» может сразу отправить сообщение или форму. Используйте только если доверяете задаче и сайту. Пароли и платежи по-прежнему ограничены.</p>
+        <div class="settings-divider"></div>
+        <p class="field-label">Подключение</p>
+        <p class="muted-text">Адрес: <span class="mono">127.0.0.1:11434</span>. Доступ с других устройств не нужен.</p>
+        <div class="help-box"><strong>Если соединения нет</strong><ol><li>Проверьте, что Ollama запущена (значок в трее Windows).</li><li>Разрешите доступ только этому расширению командой ниже.</li><li>Закройте Ollama через значок в трее и запустите снова из меню «Пуск».</li></ol>
+          <div class="command-box"><code id="origin-command"></code><button id="copy-command" title="Скопировать команду" aria-label="Скопировать команду">⧉</button></div>
+          <p class="tiny-note">Команда задаёт OLLAMA_ORIGINS для вашего пользователя Windows. Не меняйте OLLAMA_HOST на 0.0.0.0.</p>
+        </div>
+        <p class="muted-text privacy-note">Режим «Действия» читает страницы по вашей просьбе. Если подтверждения выключены, нажатия и ввод выполняются без окна проверки; не используйте это на страницах с паролями, платёжными данными и личными сообщениями. Текст страниц не сохраняется в истории; чаты остаются на этом ПК.</p>
+      </div>
+    </section>
+    <div class="approval hidden" id="approval" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-detail">
+      <div class="approval-card"><div class="approval-eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</div><h2 id="approval-title"></h2><p class="approval-site" id="approval-site"></p><p class="approval-detail" id="approval-detail"></p><div class="approval-buttons"><button type="button" id="approval-no">Отмена</button><button type="button" id="approval-yes">Разрешить один раз</button></div></div>
+    </div>
+    <div class="toast hidden" id="toast" role="alert"></div>
+  </div>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
