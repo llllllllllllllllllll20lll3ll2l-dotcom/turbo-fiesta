@@ -1,6 +1,7 @@
 name: Attach Pero 1.6.0 release files
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - arena/38c65fee-turbo-fiesta
