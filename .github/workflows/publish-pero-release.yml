@@ -1,0 +1,36 @@
+name: Attach Pero 1.6.0 release files
+
+on:
+  push:
+    branches:
+      - arena/38c65fee-turbo-fiesta
+    paths:
+      - .github/workflows/publish-pero-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify files match the published tag
+        run: |
+          test "$(git rev-parse v1.6.0:pero-local-ai.zip)" = "$(git hash-object pero-local-ai.zip)"
+          test -f extension/install-pero.bat
+          test -f extension/install-pero.ps1
+          test -f extension/INSTALL.txt
+      - name: Upload installable package and instructions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload v1.6.0 \
+            pero-local-ai.zip \
+            extension/install-pero.bat \
+            extension/install-pero.ps1 \
+            extension/INSTALL.txt \
+            --clobber
