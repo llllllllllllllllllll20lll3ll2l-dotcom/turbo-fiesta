@@ -8,6 +8,7 @@ const script = readFileSync(new URL('../extension/content.js', import.meta.url),
 test('page script keeps a black pointer until the matching work session ends', () => {
   let listener;
   let host = null;
+  let transient = null;
   let creations = 0;
   let interval = null;
   let clock = 1000;
@@ -26,7 +27,7 @@ test('page script keeps a black pointer until the matching work session ends', (
     crypto: { randomUUID: () => 'deadbeef-0000-0000-0000-000000000000' },
     chrome: { runtime: { id: 'pero-test', onMessage: { addListener(fn) { listener = fn; } } } },
     document: {
-      querySelector(selector) { return selector === '[data-pero-work-pointer]' ? host : null; },
+      querySelector(selector) { return selector === '[data-pero-work-pointer]' ? host : selector === '[data-pero-agent-pointer]' ? transient : null; },
       createElement() { creations++; return makeElement(); },
       createElementNS: makeElement,
       documentElement: { append(el) { host = el; } }
@@ -35,14 +36,18 @@ test('page script keeps a black pointer until the matching work session ends', (
   vm.runInNewContext(script, context);
   const send = (action, token) => {
     let response;
-    listener({ source: 'pero-work-pointer', action, token }, { id: 'pero-test' }, result => { response = result; });
+    listener({ source: 'pero-work-pointer-v2', action, token }, { id: 'pero-test' }, result => { response = result; });
     return response;
   };
+  transient = { remove() { transient = null; } };
   assert.equal(send('POINTER_START', 'abc123xyz').ok, true);
+  assert.equal(transient, null); // Replace an earlier action pointer, never show two extension arrows.
   assert.equal(host?.attrs['data-pero-work-pointer'], 'abc123xyz');
   assert.match(host.style.cssText, /pointer-events:none/);
   assert.equal(creations, 2); // Host and its shadow style; SVG uses createElementNS.
+  transient = { remove() { transient = null; } };
   send('POINTER_START', 'abc123xyz');
+  assert.equal(transient, null); // A heartbeat also removes a late duplicate.
   assert.equal(creations, 2); // Repeated keep-alive does not recreate or move the pointer.
   send('POINTER_STOP', 'other789');
   assert.ok(host);

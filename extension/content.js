@@ -1,7 +1,7 @@
 // Runs only in normal web pages. It never reads a page until the user asks from the panel.
 (() => {
-  if (globalThis.__PERO_CONTENT_VERSION__ === '1.5.0') return;
-  globalThis.__PERO_CONTENT_VERSION__ = '1.5.0';
+  if (globalThis.__PERO_CONTENT_VERSION__ === '1.6.1') return;
+  globalThis.__PERO_CONTENT_VERSION__ = '1.6.1';
   const refs = new Map();
   const sessionId = crypto.randomUUID().slice(0, 8);
   let generation = 0;
@@ -91,6 +91,7 @@
     if (typeof token !== 'string' || !/^[a-z0-9]{6,16}$/.test(token)) throw new Error('Некорректный указатель.');
     const existing = document.querySelector('[data-pero-work-pointer]');
     workPointerLastSeen = Date.now();
+    document.querySelector('[data-pero-agent-pointer]')?.remove();
     if (existing?.getAttribute('data-pero-work-pointer') === token) return;
     existing?.remove();
     const host = document.createElement('div');
@@ -140,8 +141,8 @@
     setTimeout(() => host.remove(), 1600);
   }
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id || (msg?.source !== 'pero-panel' && msg?.source !== 'pero-work-pointer')) return;
-    if (msg.source === 'pero-work-pointer' && !['POINTER_START', 'POINTER_STOP'].includes(msg.action)) return;
+    if (sender.id !== chrome.runtime.id || (msg?.source !== 'pero-panel' && msg?.source !== 'pero-work-pointer-v2')) return;
+    if (msg.source === 'pero-work-pointer-v2' && !['POINTER_START', 'POINTER_STOP'].includes(msg.action)) return;
     if (msg.source === 'pero-panel' && ['POINTER_START', 'POINTER_STOP'].includes(msg.action)) return;
     try {
       let result;

@@ -22,16 +22,37 @@ function browserMock() {
   return { api, calls, listeners };
 }
 
-test('working cursor appears on web page and is removed when request ends', async () => {
+test('working cursor reports page visibility so the sidebar fallback can hide', async () => {
   const { api, calls, listeners } = browserMock();
-  const session = startWorkPointer(api);
+  const visibility = [];
+  const session = startWorkPointer(api, undefined, value => visibility.push(value));
   await session.ready;
   assert.ok(calls.some(([id, msg]) => id === 1 && msg.action === 'POINTER_START'));
+  assert.deepEqual(visibility, [true]);
+  // A restricted page cannot show the injected cursor; display only the sidebar one.
+  listeners.activated({ tabId: 3, windowId: 1 });
+  await tick();
+  assert.deepEqual(visibility, [true, false]);
+  listeners.activated({ tabId: 1, windowId: 1 });
+  await tick();
+  assert.deepEqual(visibility, [true, false, true]);
   session.stop();
   await tick();
+  assert.deepEqual(visibility, [true, false, true, false]);
   assert.ok(calls.some(([id, msg]) => id === 1 && msg.action === 'POINTER_STOP'));
   assert.equal(listeners.activated, null);
   assert.equal(listeners.updated, null);
+});
+
+test('page injection failure leaves the sidebar fallback visible', async () => {
+  const { api } = browserMock();
+  const visibility = [];
+  api.tabs.sendMessage = async () => { throw Error('No receiver'); };
+  api.scripting.executeScript = async () => { throw Error('Cannot access browser page'); };
+  const session = startWorkPointer(api, undefined, value => visibility.push(value));
+  await session.ready;
+  assert.deepEqual(visibility, []); // false by default; never report a successful page cursor.
+  session.stop();
 });
 
 test('cursor injects new content script when an old script ignores pointer messages', async () => {

@@ -26,6 +26,8 @@ let requestId = 0;
 let preparing = false;
 let toastTimer = null;
 let workPointer = null;
+let pagePointerVisible = false;
+let isBusy = false;
 
 const originCommand = `[Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS','chrome-extension://${chrome.runtime.id}','User')`;
 ui.originCommand.textContent = originCommand;
@@ -50,9 +52,18 @@ function updateContextUI() {
 }
 
 function updateBusy(busy) {
-  ui.workCursor.classList.toggle('hidden', !busy);
-  if (busy && !workPointer) workPointer = startWorkPointer(chrome, requestController?.signal);
-  if (!busy && workPointer) { workPointer.stop(); workPointer = null; }
+  isBusy = busy;
+  if (busy && !workPointer) {
+    pagePointerVisible = false;
+    const session = startWorkPointer(chrome, requestController?.signal, visible => {
+      if (workPointer !== session || !isBusy) return;
+      pagePointerVisible = visible;
+      ui.workCursor.classList.toggle('hidden', visible);
+    });
+    workPointer = session;
+  }
+  if (!busy && workPointer) { workPointer.stop(); workPointer = null; pagePointerVisible = false; }
+  ui.workCursor.classList.toggle('hidden', !busy || pagePointerVisible);
   ui.send.classList.toggle('hidden', busy);
   ui.stop.classList.toggle('hidden', !busy);
   ui.prompt.disabled = busy;

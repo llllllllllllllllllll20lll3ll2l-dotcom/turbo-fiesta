@@ -1,14 +1,20 @@
 // A visible extension-owned cursor while a request is running. It does not
 // move the OS cursor or read the page; restricted browser pages are skipped.
-export function startWorkPointer(api, signal) {
+export function startWorkPointer(api, signal, onPageVisibilityChange = () => {}) {
   const token = Math.random().toString(36).slice(2, 12);
   const touched = new Set();
   let active = true;
   let currentId = null;
   let sequence = 0;
+  let pageVisible = false;
+  function reportPageVisibility(visible) {
+    if (pageVisible === visible) return;
+    pageVisible = visible;
+    onPageVisibilityChange(visible);
+  }
 
   async function sendStop(id) {
-    try { await api.tabs.sendMessage(id, { source: 'pero-work-pointer', action: 'POINTER_STOP', token }); }
+    try { await api.tabs.sendMessage(id, { source: 'pero-work-pointer-v2', action: 'POINTER_STOP', token }); }
     catch { /* The tab may have navigated or closed. */ }
   }
   async function show(id, force = false) {
@@ -19,11 +25,15 @@ export function startWorkPointer(api, signal) {
       if (!active || generation !== sequence) return;
       if (tab.incognito || !/^https?:\/\//i.test(tab.url || '')) {
         if (currentId) { void sendStop(currentId); currentId = null; }
+        reportPageVisibility(false);
         return;
       }
-      if (currentId && currentId !== id) void sendStop(currentId);
+      if (currentId && currentId !== id) {
+        reportPageVisibility(false);
+        void sendStop(currentId);
+      }
       currentId = id;
-      const msg = { source: 'pero-work-pointer', action: 'POINTER_START', token };
+      const msg = { source: 'pero-work-pointer-v2', action: 'POINTER_START', token };
       try {
         const reply = await api.tabs.sendMessage(id, msg);
         if (!reply?.ok || !reply.result?.visible) throw new Error('Указатель ещё не установлен.');
@@ -37,7 +47,11 @@ export function startWorkPointer(api, signal) {
       }
       touched.add(id);
       if (!active || generation !== sequence) await sendStop(id);
-    } catch { /* Some pages refuse scripting; the panel cursor remains visible. */ }
+      else reportPageVisibility(true);
+    } catch {
+      // An inaccessible page cannot host the arrow: use the sidebar fallback.
+      if (active && generation === sequence) reportPageVisibility(false);
+    }
   }
   async function sync() {
     if (!active) return;
@@ -48,7 +62,7 @@ export function startWorkPointer(api, signal) {
   }
   const activated = info => { void show(info.tabId, true); };
   const updated = (id, change, tab) => { if (change.status === 'complete' && tab?.active) void show(id, true); };
-  const removed = id => { touched.delete(id); if (currentId === id) { currentId = null; void sync(); } };
+  const removed = id => { touched.delete(id); if (currentId === id) { currentId = null; reportPageVisibility(false); void sync(); } };
   const focused = () => { void sync(); };
   api.tabs.onActivated?.addListener(activated);
   api.tabs.onUpdated?.addListener(updated);
@@ -68,6 +82,7 @@ export function startWorkPointer(api, signal) {
     api.windows?.onFocusChanged?.removeListener(focused);
     signal?.removeEventListener('abort', stop);
     if (currentId) touched.add(currentId);
+    reportPageVisibility(false);
     for (const id of touched) void sendStop(id);
     touched.clear();
     currentId = null;
